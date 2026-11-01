@@ -64,7 +64,7 @@ def grid(ar, df, col_key, col_vals, col_fmt, line_key, line_vals, line_fmt, ylab
             ax.set_title("{}, {}".format(ar.LABELS[alg], col_fmt.format(cv)))
         axes[r][0].set_ylabel(ylabel)
     for ax in axes[-1]:
-        ax.set_xlabel("processos MPI p")
+        ax.set_xlabel(r"processos MPI $p$")
     axes[0][0].legend(frameon=False)
     fig.suptitle(title + " (mediana de 5 execuções; barras: desvio padrão)")
     fig.tight_layout()
@@ -126,44 +126,44 @@ def main():
     os.makedirs(OUT, exist_ok=True)
 
     t = m[m.metric == "time_total_s"]
-    grid(ar, t, "matrix_size", sizes, "N = {}", "block_size", blocks, "bloco {}".format,
-         "tempo total T [s]", "Tempo total vs p por tamanho de bloco", "tempo_blocos.pdf")
+    grid(ar, t, "matrix_size", sizes, r"$N$ = {}", "block_size", blocks, "bloco {}".format,
+         r"tempo total $T$ [s]", "Tempo total vs p por tamanho de bloco", "tempo_blocos.pdf")
     g = m[m.metric == "gflops"]
-    grid(ar, g, "block_size", blocks, "bloco {}", "matrix_size", sizes, "N = {}".format,
+    grid(ar, g, "block_size", blocks, "bloco {}", "matrix_size", sizes, r"$N$ = {}".format,
          "desempenho [GFLOP/s]", "Desempenho vs p por tamanho de matriz",
          "gflops_tamanhos.pdf")
     ph = m[m.metric.isin(list(PHASES))]
     for b in blocks:
-        grid(ar, ph[ph.block_size == b], "matrix_size", sizes, "N = {}", "metric",
+        grid(ar, ph[ph.block_size == b], "matrix_size", sizes, r"$N$ = {}", "metric",
              list(PHASES), PHASES.get, "tempo da fase [s] (máx. entre ranks)",
              "Tempo por fase, bloco {}".format(b), "fases_b{}.pdf".format(b))
 
     # Portuguese re-plots of results/figures/{speedup_parallel,efficiency_strong}_b*.png,
     # efficiency_weak.png and node_sweep_b*.png.
     ideal = lambda ax, ps: ax.plot(ps, ps, color="#8a8980", linewidth=1, linestyle=":",
-                                   label="ideal (S_p = p)")
+                                   label=r"ideal ($S_p = p$)")
     half = lambda ax, ps: ax.axhline(ar.SATURATION_EFFICIENCY, color="#8a8980", linewidth=1,
-                                     linestyle=":", label="E_p = 0,5 (saturação)")
+                                     linestyle=":", label=r"$E_p$ = 0,5 (saturação)")
     for b in blocks:
         for metric, ylabel, ref, ylog2 in (
-                ("speedup_parallel", "speedup paralelo S_p = T_1 / T_p", ideal, True),
-                ("efficiency_strong", "eficiência E_p = S_p / p", half, False)):
+                ("speedup_parallel", r"speedup paralelo $S_p = T_1/T_p$", ideal, True),
+                ("efficiency_strong", r"eficiência $E_p = S_p/p$", half, False)):
             versions_row(ar, m[(m.metric == metric) & (m.block_size == b)], "matrix_size",
-                         sizes, "N = {}", "processes", "processos MPI p", ylabel,
+                         sizes, r"$N$ = {}", "processes", r"processos MPI $p$", ylabel,
                          "Escalabilidade forte, bloco {}".format(b),
                          "{}_b{}.pdf".format(metric, b), ref, ylog2)
     w = allm[(allm.scaling == "weak") & (allm.metric == "efficiency_weak")]
     one = lambda ax, ps: ax.axhline(1.0, color="#8a8980", linewidth=1, linestyle=":",
-                                    label="E_w = 1")
+                                    label=r"$E_w = 1$")
     versions_row(ar, w, "block_size", blocks, "bloco {}", "processes",
-                 "processos MPI p (N = 2000, 4000, 6000)", "eficiência fraca E_w = T_1 / T_p",
+                 r"processos MPI $p$ ($N$ = 2000, 4000, 6000)", r"eficiência fraca $E_w = T_1/T_p$",
                  "Escalabilidade fraca", "efficiency_weak.pdf", one, xlog2=False)
     sw = pd.read_csv(os.path.join(args.repo, "results", "node_sweep.csv")).rename(
         columns={"median_total_s": "value", "std_total_s": "std"})
     for b in blocks:
-        versions_row(ar, sw[sw.block_size == b], "matrix_size", sizes, "N = {}", "nodes",
-                     "nós (p = 128 fixo)", "tempo total T [s]",
-                     "Varredura de nós com p = 128 fixo, bloco {}".format(b),
+        versions_row(ar, sw[sw.block_size == b], "matrix_size", sizes, r"$N$ = {}", "nodes",
+                     r"nós ($p$ = 128 fixo)", r"tempo total $T$ [s]",
+                     r"Varredura de nós com $p$ = 128 fixo, bloco {}".format(b),
                      "node_sweep_b{}.pdf".format(b))
 
 
