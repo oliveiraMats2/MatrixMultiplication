@@ -2,6 +2,8 @@
 \usepackage[utf8]{inputenc}
 \usepackage{epstopdf}
 \usepackage{graphicx}
+\usepackage{float}
+\usepackage{placeins}
 \usepackage{caption}
 \captionsetup{font=small,skip=3pt}
 \usepackage{booktabs}
@@ -59,13 +61,7 @@ Este trabalho multiplica duas matrizes quadradas $N\times N$ em ponto flutuante 
 \section{Implementação}
 O programa é escrito em C11, e cada versão é um executável próprio, compilado do mesmo código, como resume a Tabela~\ref{tab:versoes}. As três versões recebem exatamente as mesmas $A$ e $B$, geradas com semente fixa.
 
-Um ladrilho, ou \emph{tile}, é uma pequena submatriz usada como unidade de cálculo. O ladrilhamento, chamado \emph{tiling} em inglês, é a técnica de organizar os laços para calcular o produto por esses blocos e reutilizar dados na memória cache. Neste trabalho, $b$ é a aresta do ladrilho $b\times b$, configurada em \texttt{config.toml} e avaliada com $b = 64$, 256 e 1024. Os ladrilhos de borda são menores quando $b$ não divide a dimensão. Esse bloco de cálculo difere do bloco de distribuição MPI: este é uma faixa de linhas atribuída a um processo, cuja altura depende de $N$ e do número de processos, conforme a Equação~\eqref{eq:linhas}, e não é um parâmetro livre.
-
-Em precisão simples, um ladrilho de aresta 64 ocupa 16 KiB, da ordem do cache L1; um de 256 ocupa 256 KiB, menos que o L2 de 512 KiB por núcleo do EPYC 7662; e um de 1024 ocupa 4 MiB, uma fração do L3. Esses valores correspondem a um único ladrilho, e o produto envolve ladrilhos de $A$, $B$ e $C$.
-
-Neste trabalho, a multiplicação de matrizes foi implementada com ladrilhamento para reutilizar dados nos níveis da hierarquia de memória e reduzir os acessos à memória principal.
-
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
 \renewcommand{\arraystretch}{1.05}
 \begin{tabularx}{\textwidth}{|l|l|c|X|}
@@ -79,6 +75,12 @@ MPI + OpenBLAS & \texttt{matmul\_mpi\_openblas} & $p$ & uma chamada \texttt{cbla
 \caption{As três versões. MPI e MPI + OpenBLAS usam o mesmo motor de distribuição, \texttt{mpi\_distributed\_multiply()}; só o kernel local muda.}
 \label{tab:versoes}
 \end{table}
+
+Um ladrilho, ou \emph{tile}, é uma pequena submatriz usada como unidade de cálculo. O ladrilhamento, chamado \emph{tiling} em inglês, é a técnica de organizar os laços para calcular o produto por esses blocos e reutilizar dados na memória cache. Neste trabalho, $b$ é a aresta do ladrilho $b\times b$, configurada em \texttt{config.toml} e avaliada com $b = 64$, 256 e 1024. Os ladrilhos de borda são menores quando $b$ não divide a dimensão. Esse bloco de cálculo difere do bloco de distribuição MPI: este é uma faixa de linhas atribuída a um processo, cuja altura depende de $N$ e do número de processos, conforme a Equação~\eqref{eq:linhas}, e não é um parâmetro livre.
+
+Em precisão simples, um ladrilho de aresta 64 ocupa 16 KiB, da ordem do cache L1; um de 256 ocupa 256 KiB, menos que o L2 de 512 KiB por núcleo do EPYC 7662; e um de 1024 ocupa 4 MiB, uma fração do L3. Esses valores correspondem a um único ladrilho, e o produto envolve ladrilhos de $A$, $B$ e $C$.
+
+Neste trabalho, a multiplicação de matrizes foi implementada com ladrilhamento para reutilizar dados nos níveis da hierarquia de memória e reduzir os acessos à memória principal.
 
 A versão Serial executa em um único processo, sem MPI e sem BLAS. O produto é calculado em ladrilhos $b\times b$ com o laço i-k-j; o laço mais interno tem passo 1 e é vetorizado pelo compilador. Para o kernel em C puro, \texttt{kernel\_naive}, o ladrilhamento preserva a ordem crescente de $k$ na soma dos produtos de cada elemento de $C$. Por isso, Serial e MPI dão resultados idênticos bit a bit para qualquer $b$ e $p$.
 
@@ -95,7 +97,7 @@ A versão MPI + OpenBLAS mantém a mesma distribuição de dados e substitui os 
 \section{Ambiente experimental}
 A Tabela~\ref{tab:amb} resume o hardware, o software e a grade de parâmetros. Todas as medições usaram o mesmo modelo de CPU, AMD EPYC 7662, inclusive a referência serial, de modo que speedup e eficiência comparam o mesmo processador.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\small
 \renewcommand{\arraystretch}{1.15}
 % fonte: benchmark.csv (colunas queue, hostnames, cpu_model, cpu_mismatch, modules, compiler, cflags,
@@ -150,26 +152,53 @@ em que $t_x^{(r)}$ é o tempo da etapa $x$ medido no rank $r$. O tempo total rel
 
 A validação roda no rank 0 depois da redução, com cronômetro próprio, gravado em \texttt{time\_validation\_s}. Os tempos, speedups, eficiências e GFLOP/s apresentados excluem a validação.
 
-Cada configuração tem 5 execuções medidas, uma por rodada, e os aquecimentos são descartados: são 1395 execuções medidas e 1395 aquecimentos, 2790 linhas no total, em 279 configurações. A medida representativa $T$ é a mediana das 5 execuções; a variabilidade é dada pelo desvio padrão amostral $\sigma$ e pelo intervalo interquartil, IQR. Nas tabelas, o formato ``mediana (desvio)'' indica a mediana com o desvio padrão entre parênteses. Como medida de dispersão relativa usa-se o coeficiente de variação,
+Cada configuração tem 5 execuções medidas, uma por rodada, e os aquecimentos são descartados: são 1395 execuções medidas e 1395 aquecimentos, 2790 linhas no total, em 279 configurações. A medida representativa $T$ é a mediana das 5 execuções; a variabilidade é dada pelo desvio padrão amostral $\sigma$ e pelo intervalo interquartil, IQR. Nas tabelas e no texto, cada valor é apresentado como mediana $\pm\,\sigma$, em que $\sigma$ é o desvio padrão amostral das 5 execuções. Como medida de dispersão relativa usa-se o coeficiente de variação,
 \begin{equation}\label{eq:cv}
 \text{Coeficiente de variação} = \frac{\sigma}{\bar{t}},
 \end{equation}
 em que $\sigma$ é o desvio padrão amostral e $\bar{t}$ a média das 5 execuções de uma configuração. Sobre as 279 configurações, o CV mediano do tempo total é 0,94\,\% e o IQR/mediana mediano é 0,84\,\%; 28 configurações têm CV acima de 5\,\% e 11 acima de 10\,\%. O maior caso é MPI + OpenBLAS com $N=2000$, $b=64$ e $p=512$, com desvio/mediana de até 566\,\% e CV de até 161\,\%: uma das 5 execuções levou 0,9037 s contra cerca de 0,065 s das outras, e o excesso está todo na distribuição. Outros casos isolados do mesmo tipo ocorreram no job multinó 1034858. A mediana e o IQR são robustos a esses valores isolados; o desvio padrão não.
+
+A mediana foi escolhida como medida representativa, em vez da média, justamente por causa desses casos. Com apenas 5 execuções por configuração, uma única execução perturbada por um evento externo ao programa, como ruído do sistema operacional ou disputa momentânea pela rede, desloca a média tanto quanto o próprio efeito que se quer medir. No caso acima, os cinco tempos são 0,0646, 0,0654, 0,0663, 0,0663 e 0,9037 s: a média é 0,233 s, cerca de 3,5 vezes o tempo de quatro das cinco execuções, enquanto a mediana, 0,0663 s, representa o comportamento típico. Com 5 execuções, a mediana só se desloca se pelo menos 3 delas mudarem, de modo que uma execução isolada não a altera. Nas configurações sem valores isolados, que são a grande maioria, média e mediana praticamente coincidem, já que o CV mediano é 0,94\,\%. Por isso os speedups e as eficiências das Equações~\eqref{eq:stot} a~\eqref{eq:ep} são razões entre medianas, e o desvio padrão é sempre informado ao lado, no formato mediana $\pm\,\sigma$, para que a dispersão, inclusive a causada por esses valores isolados, continue visível.
+% fonte: results/benchmark.csv, warmup=false, mpi_openblas, N=2000, b=64, p=512: tempos 0.064587, 0.065441, 0.066264, 0.066333, 0.903724 s; média 0.23327, mediana 0.066264
 % fonte: results/benchmark.csv, warmup=false, time_total_s agrupado por (algorithm, matrix_size, block_size, processes, nodes, scaling):
 % 279 grupos; std/mediana e std/média têm a mesma mediana (0,94 %) e as mesmas contagens (28 > 5 %, 11 > 10 %); máximos 5,656 e 1,607
 
-Em todas as métricas, $T_v(N,b,p)$ é a mediana do tempo total $t_{\mathrm{total}}$ da versão $v$ com tamanho $N$, bloco $b$ e $p$ processos. O speedup total compara cada versão com a Serial de mesmo $N$ e mesmo $b$, que é a sua referência:
+Em todas as métricas, $T_v(N,b,p)$ é o tempo representativo da versão $v$ com tamanho $N$, bloco $b$ e $p$ processos. Pelas Equações~\eqref{eq:fases} e~\eqref{eq:max}, ele é a mediana, sobre as 5 execuções medidas, do tempo total do rank mais lento:
+\begin{equation}\label{eq:T}
+\begin{split}
+T_v(N,b,p) &= \operatorname*{med}_{k=1,\dots,5} \; t_{\mathrm{total}}^{[k]} \\
+&= \operatorname*{med}_{k=1,\dots,5} \; \max_{0 \le r < p} \left( t_3^{(r,k)} - t_0^{(r,k)} \right),
+\end{split}
+\end{equation}
+em que $k$ indica a execução medida, $r$ o rank, e $t_0^{(r,k)}$ e $t_3^{(r,k)}$ são os instantes de início e de fim medidos no rank $r$ na execução $k$. Na Serial há um único processo e só o kernel é cronometrado, de modo que
+\begin{equation}\label{eq:Tserial}
+T_{\mathrm{serial}}(N,b) = \operatorname*{med}_{k=1,\dots,5} \left( t_2^{(k)} - t_1^{(k)} \right).
+\end{equation}
+O speedup total compara cada versão com a Serial de mesmo $N$ e mesmo $b$, que é a sua referência. Substituindo as Equações~\eqref{eq:T} e~\eqref{eq:Tserial}, ele fica
 \begin{equation}\label{eq:stot}
-S^{\mathrm{tot}}_p = \frac{T_{\mathrm{serial}}(N,b)}{T_v(N,b,p)}.
+\begin{split}
+S^{\mathrm{tot}}_p &= \frac{T_{\mathrm{serial}}(N,b)}{T_v(N,b,p)} \\[4pt]
+&= \frac{\operatorname*{med}_{k} \left( t_2^{(k)} - t_1^{(k)} \right)_{\mathrm{serial}}}
+        {\operatorname*{med}_{k} \; \max_{0 \le r < p} \left( t_3^{(r,k)} - t_0^{(r,k)} \right)_{v}}.
+\end{split}
 \end{equation}
-O speedup paralelo usa como referência a própria versão $v$ com $p=1$, mesmo $N$ e mesmo $b$:
+O speedup paralelo usa como referência a própria versão $v$ com $p=1$, mesmo $N$ e mesmo $b$. Com $p=1$ o máximo da Equação~\eqref{eq:T} tem um único termo, o do rank 0, e portanto
 \begin{equation}\label{eq:sp}
-S_p = \frac{T_v(N,b,1)}{T_v(N,b,p)},
+\begin{split}
+S_p &= \frac{T_v(N,b,1)}{T_v(N,b,p)} \\[4pt]
+&= \frac{\operatorname*{med}_{k} \left( t_3^{(0,k)} - t_0^{(0,k)} \right)_{p=1}}
+        {\operatorname*{med}_{k} \; \max_{0 \le r < p} \left( t_3^{(r,k)} - t_0^{(r,k)} \right)_{p}},
+\end{split}
 \end{equation}
-e a eficiência forte divide esse ganho pelo número de processos:
+em que os índices $p=1$ e $p$ indicam de qual execução vêm os instantes. A eficiência forte divide esse ganho pelo número de processos:
 \begin{equation}\label{eq:ep}
-E_p = \frac{S_p}{p}.
+\begin{split}
+E_p &= \frac{S_p}{p} = \frac{T_v(N,b,1)}{p \, T_v(N,b,p)} \\[4pt]
+&= \frac{\operatorname*{med}_{k} \left( t_3^{(0,k)} - t_0^{(0,k)} \right)_{p=1}}
+        {p \, \operatorname*{med}_{k} \; \max_{0 \le r < p} \left( t_3^{(r,k)} - t_0^{(r,k)} \right)_{p}}.
+\end{split}
 \end{equation}
+Os speedups são, assim, razões entre medianas, e não medianas de razões.
 O $S^{\mathrm{tot}}_p$ mistura o ganho do paralelismo com o ganho do kernel, OpenBLAS contra C puro; o $S_p$ isola o paralelismo. A eficiência fraca usa como referência a mesma versão e o mesmo bloco com $N=2000$ e $p=1$, numa execução marcada como fraca:
 \begin{equation}\label{eq:ew}
 E_w = \frac{T_v(2000,b,1)}{T_v(N,b,p)}, \qquad (N,p) \in \{(2000,1),\ (4000,8),\ (6000,27)\}.
@@ -216,9 +245,9 @@ O erro relativo típico de reordenar uma soma de $N$ termos em \texttt{float} é
 \end{equation}
 em que $2^{-24}$ é o erro de arredondamento unitário do \texttt{float}. Assim, $\mathrm{rtol}=10^{-4}$ deixa uma margem de cerca de 20 vezes e ainda reprova qualquer erro de indexação ou de comunicação, que produz erros da ordem de 1.
 
-A Tabela~\ref{tab:val} resume a validação. As 279 configurações $\times$ 5 execuções medidas $=$ 1395 execuções medidas, mais os 1395 aquecimentos, foram todas válidas, com 0 elementos reprovados. Serial e MPI têm erro exatamente 0, como esperado da mesma ordem de soma. MPI + OpenBLAS tem erros pequenos e não nulos: o erro absoluto máximo da Equação~\eqref{eq:eabs} vai de 0,0016, com $N=2000$, a 0,0103, com $N=6000$, e passa de $\mathrm{atol}=10^{-3}$. Mesmo assim a execução é aprovada pelo termo relativo da Equação~\eqref{eq:crit}, pois o erro relativo máximo da Equação~\eqref{eq:erel} é no máximo $6{,}97\cdot10^{-6}$, 14 a 34 vezes abaixo de $\mathrm{rtol}=10^{-4}$. Isso é o esperado para \texttt{float} com outra ordem de soma: o erro absoluto cresce com $|C|$, que chega a cerca de 1500, enquanto o erro relativo fica na ordem da Equação~\eqref{eq:reord}. O tempo de validação, de 0,011 s com $N=2000$ a 0,097 s com $N=6000$, não entra em nenhum tempo de desempenho.
+A Tabela~\ref{tab:val} resume a validação. Nela, os erros são o pior caso entre todas as execuções medidas, os blocos 64, 256 e 1024 e todos os $p$; por serem máximos, não têm dispersão associada. O tempo de validação $t_{\mathrm{val}}$, medido à parte, aparece como mediana $\pm\,\sigma$ sobre todas as execuções da versão e do $N$. As 279 configurações $\times$ 5 execuções medidas $=$ 1395 execuções medidas, mais os 1395 aquecimentos, foram todas válidas, com 0 elementos reprovados. Serial e MPI têm erro exatamente 0, como esperado da mesma ordem de soma. MPI + OpenBLAS tem erros pequenos e não nulos: o erro absoluto máximo da Equação~\eqref{eq:eabs} vai de 0,0016, com $N=2000$, a 0,0103, com $N=6000$, e passa de $\mathrm{atol}=10^{-3}$. Mesmo assim a execução é aprovada pelo termo relativo da Equação~\eqref{eq:crit}, pois o erro relativo máximo da Equação~\eqref{eq:erel} é no máximo $6{,}97\cdot10^{-6}$, 14 a 34 vezes abaixo de $\mathrm{rtol}=10^{-4}$. Isso é o esperado para \texttt{float} com outra ordem de soma: o erro absoluto cresce com $|C|$, que chega a cerca de 1500, enquanto o erro relativo fica na ordem da Equação~\eqref{eq:reord}. O tempo de validação, de 0,011 s com $N=2000$ a 0,097 s com $N=6000$, não entra em nenhum tempo de desempenho.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
 \renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3pt}
 % fonte: results/validation_summary.csv (execuções medidas); por versão e N, pior caso entre b = 64, 256, 1024
@@ -228,17 +257,17 @@ A Tabela~\ref{tab:val} resume a validação. As 279 configurações $\times$ 5 e
 \hline
 \textbf{Versão} & \textbf{$N$} & \textbf{Válidas} & \textbf{Erro abs. máx.} & \textbf{Erro abs. médio} & \textbf{Erro rel. máx.} & \textbf{Reprov.} & \textbf{$t_{\mathrm{val}}$ [s]} & \textbf{Status} \\
 \hline\hline
-Serial & 2000 & 15/15 & 0 & 0 & 0 & 0 & 0,0107 (0,000054) & PASS \\ \hline
-Serial & 4000 & 15/15 & 0 & 0 & 0 & 0 & 0,0429 (0,00014) & PASS \\ \hline
-Serial & 6000 & 15/15 & 0 & 0 & 0 & 0 & 0,0963 (0,00019) & PASS \\ \hline\hline
-MPI & 2000 & 225/225 & 0 & 0 & 0 & 0 & 0,0107 (0,00041) & PASS \\ \hline
-MPI & 4000 & 225/225 & 0 & 0 & 0 & 0 & 0,0423 (0,0010) & PASS \\ \hline
-MPI & 6000 & 225/225 & 0 & 0 & 0 & 0 & 0,0966 (0,0025) & PASS \\ \hline\hline
-MPI + OpenBLAS & 2000 & 225/225 & 0,00159 & 0,000240 & $3{,}08\cdot10^{-6}$ & 0 & 0,0107 (0,00045) & PASS \\ \hline
-MPI + OpenBLAS & 4000 & 225/225 & 0,00458 & 0,000672 & $4{,}57\cdot10^{-6}$ & 0 & 0,0434 (0,0030) & PASS \\ \hline
-MPI + OpenBLAS & 6000 & 225/225 & 0,0103 & 0,00141 & $6{,}97\cdot10^{-6}$ & 0 & 0,0968 (0,0060) & PASS \\ \hline
+Serial & 2000 & 15/15 & 0 & 0 & 0 & 0 & 0,0107 $\pm$ 0,000054 & PASS \\ \hline
+Serial & 4000 & 15/15 & 0 & 0 & 0 & 0 & 0,0429 $\pm$ 0,00014 & PASS \\ \hline
+Serial & 6000 & 15/15 & 0 & 0 & 0 & 0 & 0,0963 $\pm$ 0,00019 & PASS \\ \hline\hline
+MPI & 2000 & 225/225 & 0 & 0 & 0 & 0 & 0,0107 $\pm$ 0,00041 & PASS \\ \hline
+MPI & 4000 & 225/225 & 0 & 0 & 0 & 0 & 0,0423 $\pm$ 0,0010 & PASS \\ \hline
+MPI & 6000 & 225/225 & 0 & 0 & 0 & 0 & 0,0966 $\pm$ 0,0025 & PASS \\ \hline\hline
+MPI + OpenBLAS & 2000 & 225/225 & 0,00159 & 0,000240 & $3{,}08\cdot10^{-6}$ & 0 & 0,0107 $\pm$ 0,00045 & PASS \\ \hline
+MPI + OpenBLAS & 4000 & 225/225 & 0,00458 & 0,000672 & $4{,}57\cdot10^{-6}$ & 0 & 0,0434 $\pm$ 0,0030 & PASS \\ \hline
+MPI + OpenBLAS & 6000 & 225/225 & 0,0103 & 0,00141 & $6{,}97\cdot10^{-6}$ & 0 & 0,0968 $\pm$ 0,0060 & PASS \\ \hline
 \end{tabular}
-\caption{Validação contra $C_{\mathrm{ref}}$, a Serial sem ladrilhos, nas execuções medidas, com o critério da Equação~\eqref{eq:crit}, $\mathrm{atol}=10^{-3}$ e $\mathrm{rtol}=10^{-4}$. Erros, definidos nas Equações~\eqref{eq:eabs} a~\eqref{eq:erel}: pior caso entre todas as execuções, os blocos 64, 256 e 1024 e todos os $p$; como são máximos, não têm dispersão associada. $t_{\mathrm{val}}$: tempo de validação, medido à parte e excluído do desempenho, dado pela mediana e pelo desvio padrão sobre todas as execuções medidas da versão e do $N$.}
+\caption{Validação contra $C_{\mathrm{ref}}$ pelo critério da Equação~\eqref{eq:crit}.}
 \label{tab:val}
 \end{table}
 
@@ -246,31 +275,35 @@ Comparar com a Serial não prova que a própria Serial esteja certa. Por isso o 
 % fonte: results/logs/build_1034701.log:109 (100% tests passed, 0 tests failed out of 13); results/logs/1034702.ada.OU; src/validation.c
 
 \section{Resultados}
+Todas as tabelas e figuras desta seção e da seguinte seguem as mesmas convenções. Cada tempo é o $T$ da Equação~\eqref{eq:T}, em segundos: a mediana de 5 execuções do tempo do rank mais lento, sem a validação, apresentada como mediana $\pm\,\sigma$. Speedups e eficiências seguem as Equações~\eqref{eq:stot} a~\eqref{eq:ew}, GFLOP/s a Equação~\eqref{eq:gflops} e $f_{\mathrm{com}}$ a Equação~\eqref{eq:fcom}, também resumidos pela mediana. Na escalabilidade forte, com $p\le 128$ as execuções ocupam 1 nó, e acima disso usam 128 processos por nó. O negrito marca o melhor valor de cada grupo comparável, isto é, o menor tempo ou o maior speedup, eficiência ou GFLOP/s; a legenda de cada tabela diz qual é o grupo.
+
 A Tabela~\ref{tab:tempos} traz o tempo total das três versões para os três tamanhos com bloco 256, a Tabela~\ref{tab:speedup} o speedup e a eficiência correspondentes e a Tabela~\ref{tab:melhor} a melhor configuração de cada versão. A Serial aparece só com $p=1$, pois roda em um único processo.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
-\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{2pt}
 % fonte: results/metrics.csv, metric=time_total_s, scaling=strong, block_size=256, nodes=max(1,ceil(p/128)); value (mediana) e std
 \begin{tabular}{|r|l|r|r|r|r|r|r|}
 \hline
 \textbf{$N$} & \textbf{Versão} & \textbf{$p=1$} & \textbf{$p=8$} & \textbf{$p=32$} & \textbf{$p=128$} & \textbf{$p=256$, 2 nós} & \textbf{$p=1024$, 8 nós} \\
 \hline\hline
-2000 & Serial & 0,480 (0,0035) &  &  &  &  &  \\ \hline
-2000 & MPI & 0,490 (0,0065) & 0,0787 (0,00089) & 0,0480 (0,00029) & 0,0639 (0,0045) & 0,0592 (0,0015) & 0,443 (0,017) \\ \hline
-2000 & MPI + OpenBLAS & 0,196 (0,00056) & 0,0454 (0,00081) & \textbf{0,0441} (0,0040) & 0,0669 (0,0054) & 0,0638 (0,00069) & 0,448 (0,0063) \\ \hline\hline
-4000 & Serial & 3,60 (0,029) &  &  &  &  &  \\ \hline
-4000 & MPI & 3,67 (0,0073) & 0,583 (0,025) & 0,256 (0,0030) & 0,262 (0,011) & 0,222 (0,11) & 1,64 (0,018) \\ \hline
-4000 & MPI + OpenBLAS & 1,55 (0,026) & 0,281 (0,0016) & \textbf{0,188} (0,0013) & 0,272 (0,011) & 0,244 (0,0027) & 1,63 (0,033) \\ \hline\hline
-6000 & Serial & 13,0 (0,042) &  &  &  &  &  \\ \hline
-6000 & MPI & 13,3 (0,025) & 1,83 (0,0043) & 0,737 (0,0030) & 0,552 (0,014) & 0,528 (0,0066) & 3,61 (0,092) \\ \hline
-6000 & MPI + OpenBLAS & 5,34 (0,020) & 0,889 (0,0080) & \textbf{0,512} (0,0031) & 0,541 (0,016) & 0,552 (0,025) & 3,67 (0,062) \\ \hline
+2000 & Serial & 0,480 $\pm$ 0,0035 &  &  &  &  &  \\ \hline
+2000 & MPI & 0,490 $\pm$ 0,0065 & 0,0787 $\pm$ 0,00089 & 0,0480 $\pm$ 0,00029 & 0,0639 $\pm$ 0,0045 & 0,0592 $\pm$ 0,0015 & 0,443 $\pm$ 0,017 \\ \hline
+2000 & MPI + OpenBLAS & 0,196 $\pm$ 0,00056 & 0,0454 $\pm$ 0,00081 & \textbf{0,0441} $\pm$ 0,0040 & 0,0669 $\pm$ 0,0054 & 0,0638 $\pm$ 0,00069 & 0,448 $\pm$ 0,0063 \\ \hline\hline
+4000 & Serial & 3,60 $\pm$ 0,029 &  &  &  &  &  \\ \hline
+4000 & MPI & 3,67 $\pm$ 0,0073 & 0,583 $\pm$ 0,025 & 0,256 $\pm$ 0,0030 & 0,262 $\pm$ 0,011 & 0,222 $\pm$ 0,11 & 1,64 $\pm$ 0,018 \\ \hline
+4000 & MPI + OpenBLAS & 1,55 $\pm$ 0,026 & 0,281 $\pm$ 0,0016 & \textbf{0,188} $\pm$ 0,0013 & 0,272 $\pm$ 0,011 & 0,244 $\pm$ 0,0027 & 1,63 $\pm$ 0,033 \\ \hline\hline
+6000 & Serial & 13,0 $\pm$ 0,042 &  &  &  &  &  \\ \hline
+6000 & MPI & 13,3 $\pm$ 0,025 & 1,83 $\pm$ 0,0043 & 0,737 $\pm$ 0,0030 & 0,552 $\pm$ 0,014 & 0,528 $\pm$ 0,0066 & 3,61 $\pm$ 0,092 \\ \hline
+6000 & MPI + OpenBLAS & 5,34 $\pm$ 0,020 & 0,889 $\pm$ 0,0080 & \textbf{0,512} $\pm$ 0,0031 & 0,541 $\pm$ 0,016 & 0,552 $\pm$ 0,025 & 3,67 $\pm$ 0,062 \\ \hline
 \end{tabular}
-\caption{Tempo total $T$ em segundos, bloco 256, escalabilidade forte: mediana e desvio padrão de 5 execuções, com o máximo entre os ranks da Equação~\eqref{eq:max} e sem a validação. Com $p\le 128$ as execuções ocupam 1 nó; acima disso, 128 processos por nó. Em negrito: menor tempo para cada $N$.}
+\caption{Tempo total $T$ [s], bloco 256, escalabilidade forte. Em negrito: menor tempo para cada $N$.}
 \label{tab:tempos}
 \end{table}
 
-\begin{table}[!htb]
+Na Tabela~\ref{tab:tempos}, a MPI + OpenBLAS com $p=1$ já é 2,3 a 2,5 vezes mais rápida que a Serial, e o menor tempo de cada $N$ ocorre com a MPI + OpenBLAS em $p=32$. Em $p=1024$, com 8 nós, os tempos voltam a crescer muito em todas as versões. A Tabela~\ref{tab:speedup} converte esses tempos em speedup e eficiência, com as referências das Equações~\eqref{eq:stot} a~\eqref{eq:ep}. Para $N=2000$, 4000 e 6000, as referências são $T_{\mathrm{serial}}(N,256) = 0{,}48038$, $3{,}60396$ e $13{,}0345$ s para $S^{\mathrm{tot}}_p$; para $S_p$ e $E_p$, são $T_{\mathrm{MPI}}(N,256,1) = 0{,}489634$, $3{,}66503$ e $13{,}3212$ s e $T_{\mathrm{MPI+OpenBLAS}}(N,256,1) = 0{,}195633$, $1{,}55462$ e $5{,}34464$ s. Como $E_p$ vale 1 em $p=1$ por definição, só $S^{\mathrm{tot}}_p$ e $S_p$ são marcados em negrito.
+
+\begin{table}[H]
 \centering\scriptsize
 \renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3.5pt}
 % fonte: results/metrics.csv, metric in {speedup_total, speedup_parallel, efficiency_strong}, scaling=strong,
@@ -279,53 +312,55 @@ A Tabela~\ref{tab:tempos} traz o tempo total das três versões para os três ta
 \hline
 \textbf{Versão} & \textbf{$N$} & \textbf{Métrica} & \textbf{$p=1$} & \textbf{$p=8$} & \textbf{$p=32$} & \textbf{$p=128$} & \textbf{$p=256$} & \textbf{$p=1024$} \\
 \hline\hline
-MPI & 2000 & $S^{\mathrm{tot}}_p$ & 0,981 (0,013) & 6,11 (0,071) & \textbf{10,0} (0,060) & 7,51 (0,51) & 8,11 (0,20) & 1,09 (0,040) \\ \hline
-MPI & 2000 & $S_p$ & 1,00 (0,013) & 6,22 (0,072) & \textbf{10,2} (0,062) & 7,66 (0,52) & 8,27 (0,20) & 1,11 (0,041) \\ \hline
-MPI & 2000 & $E_p$ & 1,00 (0,013) & 0,778 (0,0090) & 0,319 (0,0019) & 0,0598 (0,0041) & 0,0323 (0,00079) & 0,00108 (0,000040) \\ \hline
-MPI & 4000 & $S^{\mathrm{tot}}_p$ & 0,983 (0,0020) & 6,18 (0,29) & 14,1 (0,16) & 13,8 (0,62) & \textbf{16,2} (3,9) & 2,20 (0,024) \\ \hline
-MPI & 4000 & $S_p$ & 1,00 (0,0020) & 6,29 (0,29) & 14,3 (0,17) & 14,0 (0,63) & \textbf{16,5} (4,0) & 2,23 (0,025) \\ \hline
-MPI & 4000 & $E_p$ & 1,00 (0,0020) & 0,786 (0,037) & 0,448 (0,0052) & 0,109 (0,0050) & 0,0645 (0,016) & 0,00218 (0,000024) \\ \hline
-MPI & 6000 & $S^{\mathrm{tot}}_p$ & 0,978 (0,0018) & 7,12 (0,017) & 17,7 (0,071) & 23,6 (0,58) & \textbf{24,7} (0,31) & 3,61 (0,095) \\ \hline
-MPI & 6000 & $S_p$ & 1,00 (0,0019) & 7,28 (0,017) & 18,1 (0,073) & 24,1 (0,60) & \textbf{25,2} (0,32) & 3,69 (0,098) \\ \hline
-MPI & 6000 & $E_p$ & 1,00 (0,0019) & 0,910 (0,0022) & 0,565 (0,0023) & 0,188 (0,0047) & 0,0985 (0,0013) & 0,00360 (0,000095) \\ \hline\hline
-MPI + OpenBLAS & 2000 & $S^{\mathrm{tot}}_p$ & 2,46 (0,0071) & 10,6 (0,19) & \textbf{10,9} (0,85) & 7,18 (0,51) & 7,53 (0,082) & 1,07 (0,015) \\ \hline
-MPI + OpenBLAS & 2000 & $S_p$ & 1,00 (0,0029) & 4,31 (0,078) & \textbf{4,44} (0,34) & 2,92 (0,21) & 3,07 (0,033) & 0,436 (0,0063) \\ \hline
-MPI + OpenBLAS & 2000 & $E_p$ & 1,00 (0,0029) & 0,539 (0,0098) & 0,139 (0,011) & 0,0228 (0,0016) & 0,0120 (0,00013) & 0,000426 ($6{,}1\cdot10^{-6}$) \\ \hline
-MPI + OpenBLAS & 4000 & $S^{\mathrm{tot}}_p$ & 2,32 (0,038) & 12,8 (0,074) & \textbf{19,2} (0,13) & 13,3 (0,52) & 14,8 (0,16) & 2,21 (0,046) \\ \hline
-MPI + OpenBLAS & 4000 & $S_p$ & 1,00 (0,016) & 5,53 (0,032) & \textbf{8,27} (0,058) & 5,72 (0,23) & 6,37 (0,071) & 0,952 (0,020) \\ \hline
-MPI + OpenBLAS & 4000 & $E_p$ & 1,00 (0,016) & 0,691 (0,0040) & 0,258 (0,0018) & 0,0447 (0,0018) & 0,0249 (0,00028) & 0,000930 (0,000019) \\ \hline
-MPI + OpenBLAS & 6000 & $S^{\mathrm{tot}}_p$ & 2,44 (0,0092) & 14,7 (0,13) & \textbf{25,5} (0,16) & 24,1 (0,70) & 23,6 (0,99) & 3,55 (0,059) \\ \hline
-MPI + OpenBLAS & 6000 & $S_p$ & 1,00 (0,0038) & 6,01 (0,054) & \textbf{10,4} (0,064) & 9,89 (0,29) & 9,69 (0,41) & 1,46 (0,024) \\ \hline
-MPI + OpenBLAS & 6000 & $E_p$ & 1,00 (0,0038) & 0,752 (0,0068) & 0,326 (0,0020) & 0,0772 (0,0022) & 0,0378 (0,0016) & 0,00142 (0,000023) \\ \hline
+MPI & 2000 & $S^{\mathrm{tot}}_p$ & 0,981 $\pm$ 0,013 & 6,11 $\pm$ 0,071 & \textbf{10,0} $\pm$ 0,060 & 7,51 $\pm$ 0,51 & 8,11 $\pm$ 0,20 & 1,09 $\pm$ 0,040 \\ \hline
+MPI & 2000 & $S_p$ & 1,00 $\pm$ 0,013 & 6,22 $\pm$ 0,072 & \textbf{10,2} $\pm$ 0,062 & 7,66 $\pm$ 0,52 & 8,27 $\pm$ 0,20 & 1,11 $\pm$ 0,041 \\ \hline
+MPI & 2000 & $E_p$ & 1,00 $\pm$ 0,013 & 0,778 $\pm$ 0,0090 & 0,319 $\pm$ 0,0019 & 0,0598 $\pm$ 0,0041 & 0,0323 $\pm$ 0,00079 & 0,00108 $\pm$ 0,000040 \\ \hline
+MPI & 4000 & $S^{\mathrm{tot}}_p$ & 0,983 $\pm$ 0,0020 & 6,18 $\pm$ 0,29 & 14,1 $\pm$ 0,16 & 13,8 $\pm$ 0,62 & \textbf{16,2} $\pm$ 3,9 & 2,20 $\pm$ 0,024 \\ \hline
+MPI & 4000 & $S_p$ & 1,00 $\pm$ 0,0020 & 6,29 $\pm$ 0,29 & 14,3 $\pm$ 0,17 & 14,0 $\pm$ 0,63 & \textbf{16,5} $\pm$ 4,0 & 2,23 $\pm$ 0,025 \\ \hline
+MPI & 4000 & $E_p$ & 1,00 $\pm$ 0,0020 & 0,786 $\pm$ 0,037 & 0,448 $\pm$ 0,0052 & 0,109 $\pm$ 0,0050 & 0,0645 $\pm$ 0,016 & 0,00218 $\pm$ 0,000024 \\ \hline
+MPI & 6000 & $S^{\mathrm{tot}}_p$ & 0,978 $\pm$ 0,0018 & 7,12 $\pm$ 0,017 & 17,7 $\pm$ 0,071 & 23,6 $\pm$ 0,58 & \textbf{24,7} $\pm$ 0,31 & 3,61 $\pm$ 0,095 \\ \hline
+MPI & 6000 & $S_p$ & 1,00 $\pm$ 0,0019 & 7,28 $\pm$ 0,017 & 18,1 $\pm$ 0,073 & 24,1 $\pm$ 0,60 & \textbf{25,2} $\pm$ 0,32 & 3,69 $\pm$ 0,098 \\ \hline
+MPI & 6000 & $E_p$ & 1,00 $\pm$ 0,0019 & 0,910 $\pm$ 0,0022 & 0,565 $\pm$ 0,0023 & 0,188 $\pm$ 0,0047 & 0,0985 $\pm$ 0,0013 & 0,00360 $\pm$ 0,000095 \\ \hline\hline
+MPI + OpenBLAS & 2000 & $S^{\mathrm{tot}}_p$ & 2,46 $\pm$ 0,0071 & 10,6 $\pm$ 0,19 & \textbf{10,9} $\pm$ 0,85 & 7,18 $\pm$ 0,51 & 7,53 $\pm$ 0,082 & 1,07 $\pm$ 0,015 \\ \hline
+MPI + OpenBLAS & 2000 & $S_p$ & 1,00 $\pm$ 0,0029 & 4,31 $\pm$ 0,078 & \textbf{4,44} $\pm$ 0,34 & 2,92 $\pm$ 0,21 & 3,07 $\pm$ 0,033 & 0,436 $\pm$ 0,0063 \\ \hline
+MPI + OpenBLAS & 2000 & $E_p$ & 1,00 $\pm$ 0,0029 & 0,539 $\pm$ 0,0098 & 0,139 $\pm$ 0,011 & 0,0228 $\pm$ 0,0016 & 0,0120 $\pm$ 0,00013 & 0,000426 $\pm$ $6{,}1\cdot10^{-6}$ \\ \hline
+MPI + OpenBLAS & 4000 & $S^{\mathrm{tot}}_p$ & 2,32 $\pm$ 0,038 & 12,8 $\pm$ 0,074 & \textbf{19,2} $\pm$ 0,13 & 13,3 $\pm$ 0,52 & 14,8 $\pm$ 0,16 & 2,21 $\pm$ 0,046 \\ \hline
+MPI + OpenBLAS & 4000 & $S_p$ & 1,00 $\pm$ 0,016 & 5,53 $\pm$ 0,032 & \textbf{8,27} $\pm$ 0,058 & 5,72 $\pm$ 0,23 & 6,37 $\pm$ 0,071 & 0,952 $\pm$ 0,020 \\ \hline
+MPI + OpenBLAS & 4000 & $E_p$ & 1,00 $\pm$ 0,016 & 0,691 $\pm$ 0,0040 & 0,258 $\pm$ 0,0018 & 0,0447 $\pm$ 0,0018 & 0,0249 $\pm$ 0,00028 & 0,000930 $\pm$ 0,000019 \\ \hline
+MPI + OpenBLAS & 6000 & $S^{\mathrm{tot}}_p$ & 2,44 $\pm$ 0,0092 & 14,7 $\pm$ 0,13 & \textbf{25,5} $\pm$ 0,16 & 24,1 $\pm$ 0,70 & 23,6 $\pm$ 0,99 & 3,55 $\pm$ 0,059 \\ \hline
+MPI + OpenBLAS & 6000 & $S_p$ & 1,00 $\pm$ 0,0038 & 6,01 $\pm$ 0,054 & \textbf{10,4} $\pm$ 0,064 & 9,89 $\pm$ 0,29 & 9,69 $\pm$ 0,41 & 1,46 $\pm$ 0,024 \\ \hline
+MPI + OpenBLAS & 6000 & $E_p$ & 1,00 $\pm$ 0,0038 & 0,752 $\pm$ 0,0068 & 0,326 $\pm$ 0,0020 & 0,0772 $\pm$ 0,0022 & 0,0378 $\pm$ 0,0016 & 0,00142 $\pm$ 0,000023 \\ \hline
 \end{tabular}
-\caption{Speedup e eficiência forte das Equações~\eqref{eq:stot} a~\eqref{eq:ep}, bloco 256: mediana e desvio padrão sobre as 5 execuções. Referências: $S^{\mathrm{tot}}_p$ usa $T_{\mathrm{serial}}(N,256) = 0{,}48038$, $3{,}60396$ e $13{,}0345$ s; $S_p$ e $E_p$ usam a mesma versão com $p=1$, isto é, $T_{\mathrm{MPI}}(N,256,1) = 0{,}489634$, $3{,}66503$ e $13{,}3212$ s e $T_{\mathrm{MPI+OpenBLAS}}(N,256,1) = 0{,}195633$, $1{,}55462$ e $5{,}34464$ s, para $N=2000$, 4000 e 6000. Em negrito: maiores $S^{\mathrm{tot}}_p$ e $S_p$ de cada linha; $E_p$ é máximo trivialmente em $p=1$.}
+\caption{Speedup e eficiência forte, bloco 256. Em negrito: maiores $S^{\mathrm{tot}}_p$ e $S_p$ de cada linha.}
 \label{tab:speedup}
 \end{table}
 
-\begin{table}[!htb]
+Na Tabela~\ref{tab:speedup}, o $S_p$ da MPI cresce até $p=256$ para $N=4000$ e 6000, enquanto o da MPI + OpenBLAS atinge o máximo em $p=32$. Já o $S^{\mathrm{tot}}_p$ da MPI + OpenBLAS supera o da MPI até $p=32$, porque soma ao paralelismo o ganho do kernel. A Tabela~\ref{tab:melhor} deixa de fixar o bloco e mostra, para cada versão e tamanho, a melhor configuração entre todos os $b$ e $p$. A melhor configuração é a de menor mediana de $T$; a tabela traz também o IQR do tempo. O desvio de 0,16 s da MPI com $N=6000$ vem de uma única execução lenta, de 0,874 s, à qual a mediana e o IQR são robustos.
+
+\begin{table}[H]
 \centering\scriptsize
 \renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3.5pt}
 % fonte: results/metrics.csv, scaling=strong, nodes=max(1,ceil(p/128)); configuração de menor mediana de time_total_s sobre b e p;
 % colunas time_total_s (value, std, iqr, n_runs), gflops (value, std), speedup_total, speedup_parallel, efficiency_strong, comm_fraction (value)
-\begin{tabular}{|l|r|r|r|r|r|r|r|r|r|r|r|r|}
+\begin{tabular}{|l|r|r|r|r|r|r|r|r|r|r|r|}
 \hline
-\textbf{Versão} & \textbf{$N$} & \textbf{$b$} & \textbf{$p$} & \textbf{Nós} & \textbf{$T$ [s]} & \textbf{Desvio} & \textbf{IQR} & \textbf{$n$} & \textbf{GFLOP/s} & \textbf{$S^{\mathrm{tot}}_p$} & \textbf{$S_p$} & \textbf{$E_p$} \\
+\textbf{Versão} & \textbf{$N$} & \textbf{$b$} & \textbf{$p$} & \textbf{Nós} & \textbf{$T\pm\sigma$ (s)} & \textbf{IQR} & \textbf{$n$} & \textbf{GFLOP/s} & \textbf{$S^{\mathrm{tot}}_p$} & \textbf{$S_p$} & \textbf{$E_p$} \\
 \hline\hline
-Serial & 2000 & 256 & 1 & 1 & 0,4804 & 0,0035 & 0,0053 & 5 & 33,31 (0,24) & n.a. & n.a. & n.a. \\ \hline
-Serial & 4000 & 256 & 1 & 1 & 3,604 & 0,029 & 0,032 & 5 & 35,52 (0,29) & n.a. & n.a. & n.a. \\ \hline
-Serial & 6000 & 256 & 1 & 1 & 13,03 & 0,042 & 0,061 & 5 & 33,14 (0,11) & n.a. & n.a. & n.a. \\ \hline\hline
-MPI & 2000 & 64 & 32 & 1 & 0,04692 & 0,00056 & 0,00046 & 5 & 341,0 (4,1) & 10,9 & \textbf{10,8} & \textbf{0,339} \\ \hline
-MPI & 4000 & 64 & 256 & 2 & 0,2217 & 0,0026 & 0,0019 & 5 & 577,3 (6,7) & 18,3 & \textbf{18,3} & 0,0714 \\ \hline
-MPI & 6000 & 64 & 256 & 2 & 0,5144 & 0,16 & 0,0048 & 5 & 839,7 (157) & 26,5 & \textbf{26,5} & 0,103 \\ \hline\hline
-MPI + OpenBLAS & 2000 & 1024 & 32 & 1 & \textbf{0,04140} & 0,00020 & 0,00033 & 5 & \textbf{386,5} (1,9) & \textbf{13,6} & 4,20 & 0,131 \\ \hline
-MPI + OpenBLAS & 4000 & 1024 & 32 & 1 & \textbf{0,1760} & 0,0010 & 0,00071 & 5 & \textbf{727,2} (4,3) & \textbf{25,0} & 7,77 & \textbf{0,243} \\ \hline
-MPI + OpenBLAS & 6000 & 1024 & 64 & 1 & \textbf{0,4733} & 0,0060 & 0,0061 & 5 & \textbf{912,7} (11) & \textbf{32,3} & 9,76 & \textbf{0,152} \\ \hline
+Serial & 2000 & 256 & 1 & 1 & 0,4804 $\pm$ 0,0035 & 0,0053 & 5 & 33,31 $\pm$ 0,24 & n.a. & n.a. & n.a. \\ \hline
+Serial & 4000 & 256 & 1 & 1 & 3,604 $\pm$ 0,029 & 0,032 & 5 & 35,52 $\pm$ 0,29 & n.a. & n.a. & n.a. \\ \hline
+Serial & 6000 & 256 & 1 & 1 & 13,03 $\pm$ 0,042 & 0,061 & 5 & 33,14 $\pm$ 0,11 & n.a. & n.a. & n.a. \\ \hline\hline
+MPI & 2000 & 64 & 32 & 1 & 0,04692 $\pm$ 0,00056 & 0,00046 & 5 & 341,0 $\pm$ 4,1 & 10,9 & \textbf{10,8} & \textbf{0,339} \\ \hline
+MPI & 4000 & 64 & 256 & 2 & 0,2217 $\pm$ 0,0026 & 0,0019 & 5 & 577,3 $\pm$ 6,7 & 18,3 & \textbf{18,3} & 0,0714 \\ \hline
+MPI & 6000 & 64 & 256 & 2 & 0,5144 $\pm$ 0,16 & 0,0048 & 5 & 839,7 $\pm$ 157 & 26,5 & \textbf{26,5} & 0,103 \\ \hline\hline
+MPI + OpenBLAS & 2000 & 1024 & 32 & 1 & \textbf{0,04140} $\pm$ 0,00020 & 0,00033 & 5 & \textbf{386,5} $\pm$ 1,9 & \textbf{13,6} & 4,20 & 0,131 \\ \hline
+MPI + OpenBLAS & 4000 & 1024 & 32 & 1 & \textbf{0,1760} $\pm$ 0,0010 & 0,00071 & 5 & \textbf{727,2} $\pm$ 4,3 & \textbf{25,0} & 7,77 & \textbf{0,243} \\ \hline
+MPI + OpenBLAS & 6000 & 1024 & 64 & 1 & \textbf{0,4733} $\pm$ 0,0060 & 0,0061 & 5 & \textbf{912,7} $\pm$ 11 & \textbf{32,3} & 9,76 & \textbf{0,152} \\ \hline
 \end{tabular}
-\caption{Melhor configuração de cada versão e tamanho, isto é, a de menor mediana de $T$ sobre $b$ e $p$, na escalabilidade forte. $T$: mediana de $n=5$ execuções, com desvio padrão e IQR. GFLOP/s pela Equação~\eqref{eq:gflops}: mediana e desvio. $S^{\mathrm{tot}}_p$, da Equação~\eqref{eq:stot}, tem como referência a Serial com o mesmo $N$ e $b$; $S_p$ e $E_p$, das Equações~\eqref{eq:sp} e~\eqref{eq:ep}, a mesma versão com $p=1$. n.a.: não se aplica. O desvio de 0,16 s em MPI, $N=6000$, vem de uma única execução lenta, de 0,874 s, à qual a mediana e o IQR são robustos. Em negrito: melhor valor de cada coluna para cada $N$, ou seja, menor $T$ e maiores GFLOP/s, $S^{\mathrm{tot}}_p$, $S_p$ e $E_p$.}
+\caption{Melhor configuração de cada versão e tamanho. n.a.: não se aplica. Em negrito: melhor valor de cada coluna para cada $N$.}
 \label{tab:melhor}
 \end{table}
 
-Com bloco 256, na Tabela~\ref{tab:tempos}, MPI com $p=1$ fica a até 2,2\,\% da Serial, com $S^{\mathrm{tot}}_1$ de 0,978 a 0,983, o custo de passar pelo motor MPI com um só processo. MPI + OpenBLAS com $p=1$ já é 2,3 a 2,5 vezes mais rápida que a Serial, só pelo kernel. Os menores tempos, na Tabela~\ref{tab:melhor}, são 0,0414, 0,176 e 0,473 s para MPI + OpenBLAS com $b=1024$ e 0,0469, 0,222 e 0,514 s para MPI com $b=64$, contra 0,480, 3,60 e 13,0 s da Serial. Em GFLOP/s, pela Equação~\eqref{eq:gflops}, a Serial fica entre 33 e 36, a MPI chega a 341, 577 e 840 e a MPI + OpenBLAS a 387, 727 e 913 para $N=2000$, 4000 e 6000. Fora da série forte, a varredura de nós com $p=128$ dá os maiores valores medidos: 999,8 GFLOP/s, com desvio de 3,4, para MPI com $N=6000$, $b=64$ e 8 nós, e 1084 GFLOP/s, com desvio de 17, para MPI + OpenBLAS com $N=6000$, $b=1024$ e 2 nós. A Figura~\ref{fig:gflops} mostra o GFLOP/s em função de $p$ para os três tamanhos.
+Com bloco 256, na Tabela~\ref{tab:tempos}, MPI com $p=1$ fica a até 2,2\,\% da Serial, com $S^{\mathrm{tot}}_1$ de 0,978 a 0,983, o custo de passar pelo motor MPI com um só processo. MPI + OpenBLAS com $p=1$ já é 2,3 a 2,5 vezes mais rápida que a Serial, só pelo kernel. Os menores tempos, na Tabela~\ref{tab:melhor}, são 0,0414, 0,176 e 0,473 s para MPI + OpenBLAS com $b=1024$ e 0,0469, 0,222 e 0,514 s para MPI com $b=64$, contra 0,480, 3,60 e 13,0 s da Serial. Em GFLOP/s, pela Equação~\eqref{eq:gflops}, a Serial fica entre 33 e 36, a MPI chega a 341, 577 e 840 e a MPI + OpenBLAS a 387, 727 e 913 para $N=2000$, 4000 e 6000. Fora da série forte, a varredura de nós com $p=128$ dá os maiores valores medidos: 999,8 $\pm$ 3,4 GFLOP/s para MPI com $N=6000$, $b=64$ e 8 nós, e 1084 $\pm$ 17 GFLOP/s para MPI + OpenBLAS com $N=6000$, $b=1024$ e 2 nós. A Figura~\ref{fig:gflops} mostra o GFLOP/s em função de $p$ para os três tamanhos.
 % fonte: results/metrics.csv, metric=gflops, p=128: mpi 6000 b64 nodes=8 (999.81, std 3.45); mpi_openblas 6000 b1024 nodes=2 (1084.05, std 17.09)
 
 \begin{figure}[!htb]
@@ -353,6 +388,8 @@ A Figura~\ref{fig:speedup} e a Tabela~\ref{tab:speedup} mostram o speedup parale
 \label{fig:speedup}
 \end{figure}
 
+Na Figura~\ref{fig:speedup}, nenhuma curva acompanha a diagonal ideal além de poucas dezenas de processos, e todas caem em $p=1024$. A Figura~\ref{fig:efic} mostra os mesmos dados como eficiência, o que deixa visível em que $p$ cada configuração cruza o limite $E_p=0{,}5$.
+
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\textwidth]{efficiency_strong_b64.pdf}\\[-0.3ex]
@@ -366,9 +403,9 @@ A Figura~\ref{fig:speedup} e a Tabela~\ref{tab:speedup} mostram o speedup parale
 \label{fig:efic}
 \end{figure}
 
-Na escalabilidade forte o tamanho do problema fica fixo e os recursos crescem. A Figura~\ref{fig:efic} mostra a eficiência forte $E_p$ da Equação~\eqref{eq:ep}: ela cai continuamente com $p$ e, com os blocos 64 e 256, fica abaixo de 0,5 a partir de $p=16$ a 64. A Tabela~\ref{tab:sat} dá o ponto de saturação da Equação~\eqref{eq:sat} para cada versão, tamanho e bloco. Para MPI com blocos 64 e 256, $p_{\mathrm{sat}}$ é 32 para $N=2000$ e 4000 e 64 para $N=6000$; para MPI + OpenBLAS é menor, de 8 a 32, pelo motivo já dito: o kernel rápido reduz a parte paralelizável, e o custo fixo da comunicação domina antes. O speedup máximo continua crescendo depois de $p_{\mathrm{sat}}$ em alguns casos, como na MPI com $N=6000$ e $b=256$, que chega a 25,2 em $p=256$, mas com eficiência baixa, $E_{256} = 0{,}0985$.
+Na escalabilidade forte o tamanho do problema fica fixo e os recursos crescem. A Figura~\ref{fig:efic} mostra a eficiência forte $E_p$ da Equação~\eqref{eq:ep}: ela cai continuamente com $p$ e, com os blocos 64 e 256, fica abaixo de 0,5 a partir de $p=16$ a 64. A Tabela~\ref{tab:sat} dá o ponto de saturação da Equação~\eqref{eq:sat} para cada versão, tamanho e bloco. A letra ao lado de cada $p_{\mathrm{sat}}$ indica o critério que o definiu: $E$ quando $E_p<0{,}5$ e $S$ quando o speedup deixa de crescer. Os desvios de 4,0 a 4,9 no $S_p$ máximo vêm de uma execução lenta isolada no job multinó. Para MPI com blocos 64 e 256, $p_{\mathrm{sat}}$ é 32 para $N=2000$ e 4000 e 64 para $N=6000$; para MPI + OpenBLAS é menor, de 8 a 32, pelo motivo já dito: o kernel rápido reduz a parte paralelizável, e o custo fixo da comunicação domina antes. O speedup máximo continua crescendo depois de $p_{\mathrm{sat}}$ em alguns casos, como na MPI com $N=6000$ e $b=256$, que chega a 25,2 em $p=256$, mas com eficiência baixa, $E_{256} = 0{,}0985$.
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
 \renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{4pt}
 % fonte: results/saturation.csv (saturation_p, criterion, max_speedup, at_p); desvio de S_p em results/metrics.csv,
@@ -378,42 +415,71 @@ Na escalabilidade forte o tamanho do problema fica fixo e os recursos crescem. A
  & & \multicolumn{3}{c|}{\textbf{$p_{\mathrm{sat}}$ e critério}} & \multicolumn{3}{c|}{\textbf{$S_p$ máximo, desvio e $p$}} \\
 \textbf{Versão} & \textbf{$N$} & \textbf{$b=64$} & \textbf{$b=256$} & \textbf{$b=1024$} & \textbf{$b=64$} & \textbf{$b=256$} & \textbf{$b=1024$} \\
 \hline\hline
-MPI & 2000 & 32, $E$ & 32, $E$ & 2, $S$ & \textbf{10,8} (0,13) em 32 & 10,2 (0,062) em 32 & 6,52 (0,20) em 512 \\ \hline
-MPI & 4000 & 32, $E$ & 32, $E$ & 2, $S$ & \textbf{18,3} (0,21) em 256 & 16,5 (4,0) em 256 & 10,3 (1,5) em 512 \\ \hline
-MPI & 6000 & 64, $E$ & 64, $E$ & 2, $S$ & \textbf{26,5} (4,9) em 256 & 25,2 (0,32) em 256 & 12,4 (0,69) em 512 \\ \hline\hline
-MPI + OpenBLAS & 2000 & 16, $E$ & 8, $S$ & 8, $E$ & \textbf{7,67} (0,056) em 32 & 4,44 (0,34) em 32 & 4,20 (0,021) em 32 \\ \hline
-MPI + OpenBLAS & 4000 & 32, $E$ & 16, $E$ & 16, $E$ & \textbf{12,6} (0,055) em 32 & 8,27 (0,058) em 32 & 7,77 (0,046) em 32 \\ \hline
-MPI + OpenBLAS & 6000 & 32, $E$ & 16, $E$ & 16, $E$ & \textbf{16,8} (4,3) em 256 & 10,6 (0,21) em 64 & 9,76 (0,12) em 64 \\ \hline
+MPI & 2000 & 32, $E$ & 32, $E$ & 2, $S$ & \textbf{10,8} $\pm$ 0,13 em 32 & 10,2 $\pm$ 0,062 em 32 & 6,52 $\pm$ 0,20 em 512 \\ \hline
+MPI & 4000 & 32, $E$ & 32, $E$ & 2, $S$ & \textbf{18,3} $\pm$ 0,21 em 256 & 16,5 $\pm$ 4,0 em 256 & 10,3 $\pm$ 1,5 em 512 \\ \hline
+MPI & 6000 & 64, $E$ & 64, $E$ & 2, $S$ & \textbf{26,5} $\pm$ 4,9 em 256 & 25,2 $\pm$ 0,32 em 256 & 12,4 $\pm$ 0,69 em 512 \\ \hline\hline
+MPI + OpenBLAS & 2000 & 16, $E$ & 8, $S$ & 8, $E$ & \textbf{7,67} $\pm$ 0,056 em 32 & 4,44 $\pm$ 0,34 em 32 & 4,20 $\pm$ 0,021 em 32 \\ \hline
+MPI + OpenBLAS & 4000 & 32, $E$ & 16, $E$ & 16, $E$ & \textbf{12,6} $\pm$ 0,055 em 32 & 8,27 $\pm$ 0,058 em 32 & 7,77 $\pm$ 0,046 em 32 \\ \hline
+MPI + OpenBLAS & 6000 & 32, $E$ & 16, $E$ & 16, $E$ & \textbf{16,8} $\pm$ 4,3 em 256 & 10,6 $\pm$ 0,21 em 64 & 9,76 $\pm$ 0,12 em 64 \\ \hline
 \end{tabular}
-\caption{Ponto de saturação $p_{\mathrm{sat}}$ da Equação~\eqref{eq:sat}: menor $p$ com $E_p<0{,}5$, critério $E$, ou com $S_p$ do $p$ seguinte menor ou igual a $S_p$, critério $S$. À direita, o maior $S_p$ da série forte, com a mediana, o desvio padrão e o $p$ onde ocorre. Referência: mesma versão, $N$ e $b$, com $p=1$. Os desvios de 4,0 a 4,9 vêm de uma execução lenta isolada no job multinó. Em negrito: maior $S_p$ de cada linha.}
+\caption{Ponto de saturação $p_{\mathrm{sat}}$, com o critério que o define, e maior $S_p$ da série forte. Em negrito: maior $S_p$ de cada linha.}
 \label{tab:sat}
 \end{table}
 
+\FloatBarrier
 Como há 1 processo por núcleo, o número de núcleos ocupados é igual a $p$; os núcleos reservados são sempre nós inteiros, de 128 núcleos. Em 1 nó, ocupar a segunda metade dos núcleos rende pouco: de $p=64$ para $p=128$, MPI com $N=6000$ e bloco 256 passa de 0,635 para 0,552 s, e MPI + OpenBLAS com bloco 1024 piora, de 0,473 para 0,508 s. Na MPI o cálculo ainda cai, de 0,317 para 0,169 s, mas a distribuição cresce, de 0,311 para 0,381 s, e os 128 ranks disputam a banda de memória do nó. A varredura de nós da Tabela~\ref{tab:nos} confirma que a ocupação por nó importa: os mesmos 128 processos espalhados em 2 nós, com 64 núcleos ocupados em cada, são 1,22 a 1,41 vezes mais rápidos que em 1 nó cheio com bloco 256.
 % fonte: results/metrics.csv (time_total_s, time_compute_s, time_distribution_s; N=6000, strong, p=64 e 128); A3 4.1 e quebra N=6000
 
-Na série forte, $p$ e o número de nós crescem juntos, com 128 processos por nó. Passar de 1 para 2 nós, isto é, de $p=128$ para 256, ainda melhora um pouco a MPI com $N=4000$ e 6000, de 0,552 para 0,528 s com $N=6000$ e bloco 256. Já 4 nós, com $p=512$, pioram, e 8 nós, com $p=1024$, elevam o tempo para 3,61 s, contra 0,552 s em $p=128$: a distribuição sozinha leva 3,56 s com $N=6000$, como mostra a Tabela~\ref{tab:fases}. Para separar o efeito dos nós do efeito dos processos, a varredura fixa $p=128$ e o espalha em 1, 2, 4 e 8 nós, na Figura~\ref{fig:nos} e na Tabela~\ref{tab:nos}. Sair do nó não custa: 2 e 8 nós são mais rápidos que 1 nó, com razão de 1,20 a 1,52 para blocos 64 e 256, pois cada rank ganha banda de memória e cache e a comunicação intranó do \texttt{Bcast} disputa menos recursos. Com 4 nós a razão fica só em 1,04 a 1,19, abaixo de 2 e de 8 nós; a medição não explica essa diferença, e os conjuntos de hosts mudam entre 2, 4 e 8 nós. A MPI com bloco 1024, dominada pelo cálculo, quase não muda, com razão de 1,01 a 1,13.
-
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
-\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{2.5pt}
+\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{1.5pt}
 % fonte: results/node_sweep.csv (median_total_s, std_total_s, node_ratio), p=128; 1 nó do job 1034860 (par128, adano35),
 % 2/4/8 nós do job 1034865 (paralela)
 \begin{tabular}{|l|r|r|r|r|r|r|r|r|r|}
 \hline
 \textbf{Versão} & \textbf{$b$} & \textbf{$N$} & \textbf{1 nó, 128/nó} & \textbf{2 nós, 64/nó} & \textbf{4 nós, 32/nó} & \textbf{8 nós, 16/nó} & \textbf{Razão 2} & \textbf{Razão 4} & \textbf{Razão 8} \\
 \hline\hline
-MPI & 256 & 2000 & 0,0639 (0,0045) & 0,0455 (0,0011) & 0,0567 (0,0032) & \textbf{0,0446} (0,00027) & 1,41 & 1,13 & \textbf{1,43} \\ \hline
-MPI & 256 & 4000 & 0,262 (0,011) & \textbf{0,193} (0,0013) & 0,223 (0,0036) & 0,193 (0,0010) & \textbf{1,36} & 1,18 & 1,35 \\ \hline
-MPI & 256 & 6000 & 0,552 (0,014) & 0,454 (0,0014) & 0,512 (0,0069) & \textbf{0,442} (0,0019) & 1,22 & 1,08 & \textbf{1,25} \\ \hline\hline
-MPI + OpenBLAS & 256 & 2000 & 0,0669 (0,0054) & 0,0490 (0,00058) & 0,0608 (0,0025) & \textbf{0,0483} (0,00063) & 1,37 & 1,10 & \textbf{1,39} \\ \hline
-MPI + OpenBLAS & 256 & 4000 & 0,272 (0,011) & \textbf{0,201} (0,0018) & 0,237 (0,0031) & 0,209 (0,00071) & \textbf{1,36} & 1,15 & 1,30 \\ \hline
-MPI + OpenBLAS & 256 & 6000 & 0,541 (0,016) & \textbf{0,435} (0,0048) & 0,512 (0,0069) & 0,450 (0,0015) & \textbf{1,24} & 1,06 & 1,20 \\ \hline\hline
-MPI & 1024 & 6000 & 3,33 (0,029) & 3,25 (0,26) & 3,29 (0,090) & \textbf{3,23} (0,0035) & 1,03 & 1,01 & \textbf{1,03} \\ \hline
+MPI & 256 & 2000 & 0,0639 $\pm$ 0,0045 & 0,0455 $\pm$ 0,0011 & 0,0567 $\pm$ 0,0032 & \textbf{0,0446} $\pm$ 0,00027 & 1,41 & 1,13 & \textbf{1,43} \\ \hline
+MPI & 256 & 4000 & 0,262 $\pm$ 0,011 & \textbf{0,193} $\pm$ 0,0013 & 0,223 $\pm$ 0,0036 & 0,193 $\pm$ 0,0010 & \textbf{1,36} & 1,18 & 1,35 \\ \hline
+MPI & 256 & 6000 & 0,552 $\pm$ 0,014 & 0,454 $\pm$ 0,0014 & 0,512 $\pm$ 0,0069 & \textbf{0,442} $\pm$ 0,0019 & 1,22 & 1,08 & \textbf{1,25} \\ \hline\hline
+MPI + OpenBLAS & 256 & 2000 & 0,0669 $\pm$ 0,0054 & 0,0490 $\pm$ 0,00058 & 0,0608 $\pm$ 0,0025 & \textbf{0,0483} $\pm$ 0,00063 & 1,37 & 1,10 & \textbf{1,39} \\ \hline
+MPI + OpenBLAS & 256 & 4000 & 0,272 $\pm$ 0,011 & \textbf{0,201} $\pm$ 0,0018 & 0,237 $\pm$ 0,0031 & 0,209 $\pm$ 0,00071 & \textbf{1,36} & 1,15 & 1,30 \\ \hline
+MPI + OpenBLAS & 256 & 6000 & 0,541 $\pm$ 0,016 & \textbf{0,435} $\pm$ 0,0048 & 0,512 $\pm$ 0,0069 & 0,450 $\pm$ 0,0015 & \textbf{1,24} & 1,06 & 1,20 \\ \hline\hline
+MPI & 1024 & 6000 & 3,33 $\pm$ 0,029 & 3,25 $\pm$ 0,26 & 3,29 $\pm$ 0,090 & \textbf{3,23} $\pm$ 0,0035 & 1,03 & 1,01 & \textbf{1,03} \\ \hline
 \end{tabular}
-\caption{Varredura de nós com $p=128$ fixo: tempo total em segundos, com mediana e desvio padrão de 5 execuções, e razão $T(1\text{ nó})/T(k\text{ nós})$ das medianas; uma razão acima de 1 indica execução mais rápida em $k$ nós. Em negrito: menor tempo de cada linha e a razão correspondente.}
+\caption{Varredura de nós com $p=128$ fixo: tempo total [s] e razão $T(1\text{ nó})/T(k\text{ nós})$. Em negrito: menor tempo de cada linha.}
 \label{tab:nos}
 \end{table}
+
+Na série forte, $p$ e o número de nós crescem juntos, com 128 processos por nó. Passar de 1 para 2 nós, isto é, de $p=128$ para 256, ainda melhora um pouco a MPI com $N=4000$ e 6000, de 0,552 para 0,528 s com $N=6000$ e bloco 256. Já 4 nós, com $p=512$, pioram, e 8 nós, com $p=1024$, elevam o tempo para 3,61 s, contra 0,552 s em $p=128$: a distribuição sozinha leva 3,56 s com $N=6000$, como mostra a Tabela~\ref{tab:fases}. Para separar o efeito dos nós do efeito dos processos, a varredura fixa $p=128$ e o espalha em 1, 2, 4 e 8 nós, na Figura~\ref{fig:nos} e na Tabela~\ref{tab:nos}. A razão $T(1\text{ nó})/T(k\text{ nós})$ é calculada entre medianas; acima de 1, a execução em $k$ nós é mais rápida. Sair do nó não custa: 2 e 8 nós são mais rápidos que 1 nó, com razão de 1,20 a 1,52 para blocos 64 e 256, pois cada rank ganha banda de memória e cache e a comunicação intranó do \texttt{Bcast} disputa menos recursos. Com 4 nós a razão fica só em 1,04 a 1,19, abaixo de 2 e de 8 nós; a medição não explica essa diferença, e os conjuntos de hosts mudam entre 2, 4 e 8 nós. A MPI com bloco 1024, dominada pelo cálculo, quase não muda, com razão de 1,01 a 1,13.
+
+\begin{table}[H]
+\centering\scriptsize
+\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3.5pt}
+% fonte: results/metrics.csv, N=6000, scaling=strong, nodes=max(1,ceil(p/128)), MPI b=256 e MPI+OpenBLAS b=1024,
+% metric in {time_total_s, time_distribution_s, time_compute_s, time_gather_s, comm_fraction}; value (mediana) e std
+\begin{tabular}{|l|r|r|r|r|r|r|r|}
+\hline
+\textbf{Versão} & \textbf{$p$} & \textbf{Nós} & \textbf{Total [s]} & \textbf{Distribuição [s]} & \textbf{Cálculo [s]} & \textbf{Coleta [s]} & \textbf{$f_{\mathrm{com}}$} \\
+\hline\hline
+MPI, $b=256$ & 1 & 1 & 13,3 $\pm$ 0,025 & $1{,}9\cdot10^{-6}$ & 13,3 $\pm$ 0,025 & $9{,}7\cdot10^{-6}$ & $8{,}9\cdot10^{-7}$ \\ \hline
+MPI, $b=256$ & 8 & 1 & 1,83 $\pm$ 0,0043 & 0,105 $\pm$ 0,0047 & 1,71 $\pm$ 0,0026 & 0,0222 $\pm$ 0,0045 & 0,0629 $\pm$ 0,0032 \\ \hline
+MPI, $b=256$ & 32 & 1 & 0,737 $\pm$ 0,0030 & 0,245 $\pm$ 0,0028 & 0,496 $\pm$ 0,00063 & 0,134 $\pm$ 0,0023 & 0,327 $\pm$ 0,0024 \\ \hline
+MPI, $b=256$ & 128 & 1 & 0,552 $\pm$ 0,014 & 0,381 $\pm$ 0,013 & 0,169 $\pm$ 0,00050 & 0,222 $\pm$ 0,011 & 0,694 $\pm$ 0,0077 \\ \hline
+MPI, $b=256$ & 256 & 2 & \textbf{0,528} $\pm$ 0,0066 & 0,422 $\pm$ 0,0063 & 0,104 $\pm$ 0,0064 & 0,220 $\pm$ 0,0082 & 0,805 $\pm$ 0,013 \\ \hline
+MPI, $b=256$ & 1024 & 8 & 3,61 $\pm$ 0,092 & 3,56 $\pm$ 0,096 & 0,0570 $\pm$ 0,047 & 0,425 $\pm$ 0,32 & 0,984 $\pm$ 0,013 \\ \hline\hline
+MPI + OpenBLAS, $b=1024$ & 1 & 1 & 4,62 $\pm$ 0,032 & $2{,}4\cdot10^{-6}$ & 4,62 $\pm$ 0,032 & $1{,}3\cdot10^{-5}$ & $3{,}2\cdot10^{-6}$ \\ \hline
+MPI + OpenBLAS, $b=1024$ & 8 & 1 & 0,795 $\pm$ 0,0046 & 0,104 $\pm$ 0,0044 & 0,683 $\pm$ 0,0034 & 0,0221 $\pm$ 0,0012 & 0,143 $\pm$ 0,0027 \\ \hline
+MPI + OpenBLAS, $b=1024$ & 32 & 1 & \textbf{0,496} $\pm$ 0,0021 & 0,248 $\pm$ 0,0019 & 0,233 $\pm$ 0,0015 & 0,175 $\pm$ 0,0032 & 0,529 $\pm$ 0,0025 \\ \hline
+MPI + OpenBLAS, $b=1024$ & 128 & 1 & 0,508 $\pm$ 0,011 & 0,398 $\pm$ 0,012 & 0,118 $\pm$ 0,0022 & 0,214 $\pm$ 0,0075 & 0,768 $\pm$ 0,0069 \\ \hline
+MPI + OpenBLAS, $b=1024$ & 256 & 2 & 0,511 $\pm$ 0,058 & 0,425 $\pm$ 0,061 & 0,104 $\pm$ 0,020 & 0,199 $\pm$ 0,048 & 0,794 $\pm$ 0,031 \\ \hline
+MPI + OpenBLAS, $b=1024$ & 1024 & 8 & 3,70 $\pm$ 0,046 & 3,64 $\pm$ 0,042 & 0,0585 $\pm$ 0,0071 & 0,745 $\pm$ 0,77 & 0,984 $\pm$ 0,0018 \\ \hline
+\end{tabular}
+\caption{Tempo de cada fase [s] com $N=6000$. Em negrito: menor tempo total de cada versão.}
+\label{tab:fases}
+\end{table}
+
+Na Tabela~\ref{tab:fases}, com $p=1024$ a distribuição sozinha leva 3,56 s na MPI e 3,64 s na MPI + OpenBLAS, quase todo o tempo total, enquanto o cálculo cai para cerca de 0,06 s. Na mesma tabela, com $p=1$ não há comunicação: a distribuição, a coleta e $f_{\mathrm{com}}$ medem só o custo de chamar coletivas com um único processo, da ordem de $10^{-6}$ s, e por isso aparecem sem $\pm\,\sigma$. A Figura~\ref{fig:nos} volta à varredura de nós com $p=128$ fixo, para os três blocos.
 
 \begin{figure}[!htb]
 \centering
@@ -430,31 +496,32 @@ MPI & 1024 & 6000 & 3,33 (0,029) & 3,25 (0,26) & 3,29 (0,090) & \textbf{3,23} (0
 
 O trabalho cresce com $2N^3$, 27 vezes de $N=2000$ para $N=6000$, enquanto o volume de $B$ difundido a cada rank cresce com $N^2$, só 9 vezes; a razão entre cálculo e comunicação cresce, portanto, com $N$. Por isso matrizes maiores escalam mais: o $S_p$ máximo da MPI com bloco 256 vai de 10,2 com $N=2000$ para 16,5 com 4000 e 25,2 com 6000, $p_{\mathrm{sat}}$ passa de 32 para 64, e o GFLOP/s máximo vai de 341 para 840, como mostra a Figura~\ref{fig:gflops}. Com $N=2000$ o tempo total é de dezenas de milissegundos a partir de $p=8$, e a comunicação passa a dominar já em $p=16$, com $f_{\mathrm{com}}=0{,}41$ na MPI com bloco 64. Na Serial, o GFLOP/s quase não depende de $N$: 33,3, 35,5 e 33,1 com bloco 256.
 
-\begin{table}[!htb]
+\FloatBarrier
+A Tabela~\ref{tab:blocos} e a Figura~\ref{fig:tempo} comparam os blocos. A tabela mostra $p=1$ e $p=8$ em 1 nó; a Serial só existe com $p=1$. Na Serial e na MPI com $p=1$ o melhor bloco é 256: com $N=6000$, a Serial leva 13,0 s com $b=256$, 13,6 s com $b=64$ e 15,3 s com $b=1024$. O ladrilho de 256, com 256 KiB, cabe no L2 de 512 KiB; o de 64 tem laços internos curtos; e o de 1024, com 4 MiB, não cabe no L2. A MPI com $b=1024$ degrada muito de $p=4$ a $p=32$: com $N=6000$, leva 27,9 s em $p=4$, contra 7,85 s em $p=2$ e 3,48 s com $b=256$ em $p=4$. O tempo volta a cair quando $p$ cresce e a faixa local encolhe, chegando a 3,33 s em $p=128$. Uma hipótese, não verificada por falta de contadores de hardware, é a disputa pelo L3 de 16 MiB compartilhado por CCX quando vários ranks, cada um com ladrilhos de 4 MiB, ocupam o mesmo CCX. Na MPI + OpenBLAS ocorre o contrário: blocos maiores são melhores com $p$ pequeno, com 8,66, 5,34 e 4,62 s para $b=64$, 256 e 1024 com $N=6000$ e $p=1$, porque cada ladrilho é uma chamada \texttt{sgemm}, e ladrilhos maiores amortizam o custo de chamada e deixam o OpenBLAS usar o seu próprio bloqueio interno. Com $p\ge128$, quando a comunicação domina, a diferença entre blocos na MPI + OpenBLAS fica entre 5 e 18\,\%.
+% fonte: results/metrics.csv time_total_s strong; A3 4.5 (spread 5 a 18 % para p >= 128)
+
+\begin{table}[H]
 \centering\footnotesize
-\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{2.5pt}
 % fonte: results/metrics.csv, metric=time_total_s, scaling=strong, p in {1, 8}, nodes=1; value (mediana) e std
 \begin{tabular}{|r|l|r|r|r|r|r|r|}
 \hline
  & & \multicolumn{3}{c|}{\textbf{$p=1$}} & \multicolumn{3}{c|}{\textbf{$p=8$}} \\
 \textbf{$N$} & \textbf{Versão} & \textbf{$b=64$} & \textbf{$b=256$} & \textbf{$b=1024$} & \textbf{$b=64$} & \textbf{$b=256$} & \textbf{$b=1024$} \\
 \hline\hline
-2000 & Serial & 0,513 (0,0024) & \textbf{0,480} (0,0035) & 0,562 (0,00033) &  &  &  \\ \hline
-2000 & MPI & 0,509 (0,0021) & \textbf{0,490} (0,0065) & 0,566 (0,00057) & 0,0807 (0,00063) & \textbf{0,0787} (0,00089) & 1,00 (0,016) \\ \hline
-2000 & MPI + OpenBLAS & 0,318 (0,0022) & 0,196 (0,00056) & \textbf{0,174} (0,0012) & 0,0607 (0,00057) & 0,0454 (0,00081) & \textbf{0,0440} (0,00050) \\ \hline\hline
-4000 & Serial & 4,06 (0,0090) & \textbf{3,60} (0,029) & 4,41 (0,0042) &  &  &  \\ \hline
-4000 & MPI & 4,05 (0,0051) & \textbf{3,67} (0,0073) & 4,44 (0,0036) & \textbf{0,568} (0,0011) & 0,583 (0,025) & 8,64 (0,013) \\ \hline
-4000 & MPI + OpenBLAS & 2,60 (0,00058) & 1,55 (0,026) & \textbf{1,37} (0,0082) & 0,433 (0,0019) & 0,281 (0,0016) & \textbf{0,263} (0,0034) \\ \hline\hline
-6000 & Serial & 13,6 (0,015) & \textbf{13,0} (0,042) & 15,3 (0,011) &  &  &  \\ \hline
-6000 & MPI & 13,6 (0,015) & \textbf{13,3} (0,025) & 15,4 (0,026) & 1,85 (0,0025) & \textbf{1,83} (0,0043) & 29,1 (0,15) \\ \hline
-6000 & MPI + OpenBLAS & 8,66 (0,019) & 5,34 (0,020) & \textbf{4,62} (0,032) & 1,65 (0,0061) & 0,889 (0,0080) & \textbf{0,795} (0,0046) \\ \hline
+2000 & Serial & 0,513 $\pm$ 0,0024 & \textbf{0,480} $\pm$ 0,0035 & 0,562 $\pm$ 0,00033 &  &  &  \\ \hline
+2000 & MPI & 0,509 $\pm$ 0,0021 & \textbf{0,490} $\pm$ 0,0065 & 0,566 $\pm$ 0,00057 & 0,0807 $\pm$ 0,00063 & \textbf{0,0787} $\pm$ 0,00089 & 1,00 $\pm$ 0,016 \\ \hline
+2000 & MPI + OpenBLAS & 0,318 $\pm$ 0,0022 & 0,196 $\pm$ 0,00056 & \textbf{0,174} $\pm$ 0,0012 & 0,0607 $\pm$ 0,00057 & 0,0454 $\pm$ 0,00081 & \textbf{0,0440} $\pm$ 0,00050 \\ \hline\hline
+4000 & Serial & 4,06 $\pm$ 0,0090 & \textbf{3,60} $\pm$ 0,029 & 4,41 $\pm$ 0,0042 &  &  &  \\ \hline
+4000 & MPI & 4,05 $\pm$ 0,0051 & \textbf{3,67} $\pm$ 0,0073 & 4,44 $\pm$ 0,0036 & \textbf{0,568} $\pm$ 0,0011 & 0,583 $\pm$ 0,025 & 8,64 $\pm$ 0,013 \\ \hline
+4000 & MPI + OpenBLAS & 2,60 $\pm$ 0,00058 & 1,55 $\pm$ 0,026 & \textbf{1,37} $\pm$ 0,0082 & 0,433 $\pm$ 0,0019 & 0,281 $\pm$ 0,0016 & \textbf{0,263} $\pm$ 0,0034 \\ \hline\hline
+6000 & Serial & 13,6 $\pm$ 0,015 & \textbf{13,0} $\pm$ 0,042 & 15,3 $\pm$ 0,011 &  &  &  \\ \hline
+6000 & MPI & 13,6 $\pm$ 0,015 & \textbf{13,3} $\pm$ 0,025 & 15,4 $\pm$ 0,026 & 1,85 $\pm$ 0,0025 & \textbf{1,83} $\pm$ 0,0043 & 29,1 $\pm$ 0,15 \\ \hline
+6000 & MPI + OpenBLAS & 8,66 $\pm$ 0,019 & 5,34 $\pm$ 0,020 & \textbf{4,62} $\pm$ 0,032 & 1,65 $\pm$ 0,0061 & 0,889 $\pm$ 0,0080 & \textbf{0,795} $\pm$ 0,0046 \\ \hline
 \end{tabular}
-\caption{Efeito do tamanho de bloco $b$: tempo total em segundos, com mediana e desvio padrão de 5 execuções, com $p=1$ e $p=8$ em 1 nó. A Serial só existe com $p=1$. Em negrito: melhor bloco de cada linha, isto é, o de menor tempo, para cada $p$.}
+\caption{Efeito do tamanho de bloco $b$ no tempo total [s], em 1 nó. Em negrito: melhor bloco de cada linha.}
 \label{tab:blocos}
 \end{table}
-
-A Tabela~\ref{tab:blocos} e a Figura~\ref{fig:tempo} comparam os blocos. Na Serial e na MPI com $p=1$ o melhor bloco é 256: com $N=6000$, a Serial leva 13,0 s com $b=256$, 13,6 s com $b=64$ e 15,3 s com $b=1024$. O ladrilho de 256, com 256 KiB, cabe no L2 de 512 KiB; o de 64 tem laços internos curtos; e o de 1024, com 4 MiB, não cabe no L2. A MPI com $b=1024$ degrada muito de $p=4$ a $p=32$: com $N=6000$, leva 27,9 s em $p=4$, contra 7,85 s em $p=2$ e 3,48 s com $b=256$ em $p=4$. O tempo volta a cair quando $p$ cresce e a faixa local encolhe, chegando a 3,33 s em $p=128$. Uma hipótese, não verificada por falta de contadores de hardware, é a disputa pelo L3 de 16 MiB compartilhado por CCX quando vários ranks, cada um com ladrilhos de 4 MiB, ocupam o mesmo CCX. Na MPI + OpenBLAS ocorre o contrário: blocos maiores são melhores com $p$ pequeno, com 8,66, 5,34 e 4,62 s para $b=64$, 256 e 1024 com $N=6000$ e $p=1$, porque cada ladrilho é uma chamada \texttt{sgemm}, e ladrilhos maiores amortizam o custo de chamada e deixam o OpenBLAS usar o seu próprio bloqueio interno. Com $p\ge128$, quando a comunicação domina, a diferença entre blocos na MPI + OpenBLAS fica entre 5 e 18\,\%.
-% fonte: results/metrics.csv time_total_s strong; A3 4.5 (spread 5 a 18 % para p >= 128)
 
 Os resultados mostram que o tamanho de ladrilho com melhor desempenho depende do kernel utilizado. Entre as configurações avaliadas, a implementação MPI em C puro apresentou seu menor tempo com $b=64$, enquanto MPI + OpenBLAS obteve o melhor resultado com $b=1024$. Essa diferença pode estar relacionada às otimizações internas da OpenBLAS, mas seriam necessárias análises adicionais de cache, vetorização e acesso à memória para confirmar essa hipótese.
 
@@ -471,12 +538,12 @@ Na escalabilidade fraca o tamanho cresce com $p$ para manter aproximadamente con
 \begin{equation}\label{eq:fraca}
 \frac{2\cdot 2000^3}{1} = \frac{2\cdot 4000^3}{8} = \frac{2\cdot 6000^3}{27} = 1{,}6\cdot 10^{10}\ \text{FLOP} = 16\ \text{GFLOP},
 \end{equation}
-em que cada numerador é o número de operações $2N^3$ do produto e cada denominador o número de processos $p$ do par. A Tabela~\ref{tab:fraca} e a Figura~\ref{fig:fraca} mostram a eficiência fraca da Equação~\eqref{eq:ew}. Com bloco 64, a MPI mantém $E_w = 0{,}893$ em $p=8$ e cai para 0,591 em $p=27$; a MPI + OpenBLAS cai mais, para 0,738 e 0,385 com $b=64$ e para 0,665 e 0,316 com $b=1024$. Dois efeitos se somam. A distribuição cresce, pois cada rank recebe $B$ inteira, com $N^2$ elementos: com bloco 64, ela leva 0,046 s em $(4000,8)$ e 0,257 s em $(6000,27)$, e $f_{\mathrm{com}}$ vai de 0,088 a 0,32 na MPI. E o próprio cálculo por processo fica mais lento, embora o trabalho seja o mesmo: na MPI com bloco 64, de 0,508 s para 0,518 e 0,588 s, e na MPI + OpenBLAS com bloco 1024, de 0,174 s para 0,208 e 0,257 s, o que indica disputa pela memória e pelo L3 compartilhados e uma matriz $B$ maior. A MPI com bloco 1024 tem $E_w$ de 0,066 e 0,040, o mesmo colapso de $b=1024$ com $4\le p\le32$ visto na escalabilidade forte.
+em que cada numerador é o número de operações $2N^3$ do produto e cada denominador o número de processos $p$ do par. A Tabela~\ref{tab:fraca} e a Figura~\ref{fig:fraca} mostram a eficiência fraca da Equação~\eqref{eq:ew}. Na tabela, a coluna $(2000,1)$ é a referência de cada versão e bloco, onde $E_w=1$. Com bloco 64, a MPI mantém $E_w = 0{,}893$ em $p=8$ e cai para 0,591 em $p=27$; a MPI + OpenBLAS cai mais, para 0,738 e 0,385 com $b=64$ e para 0,665 e 0,316 com $b=1024$. Dois efeitos se somam. A distribuição cresce, pois cada rank recebe $B$ inteira, com $N^2$ elementos: com bloco 64, ela leva 0,046 s em $(4000,8)$ e 0,257 s em $(6000,27)$, e $f_{\mathrm{com}}$ vai de 0,088 a 0,32 na MPI. E o próprio cálculo por processo fica mais lento, embora o trabalho seja o mesmo: na MPI com bloco 64, de 0,508 s para 0,518 e 0,588 s, e na MPI + OpenBLAS com bloco 1024, de 0,174 s para 0,208 e 0,257 s, o que indica disputa pela memória e pelo L3 compartilhados e uma matriz $B$ maior. A MPI com bloco 1024 tem $E_w$ de 0,066 e 0,040, o mesmo colapso de $b=1024$ com $4\le p\le32$ visto na escalabilidade forte.
 % fonte: results/metrics.csv scaling=weak (time_total_s, time_distribution_s, time_compute_s, efficiency_weak, comm_fraction)
 
-\begin{table}[!htb]
+\begin{table}[H]
 \centering\footnotesize
-\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3pt}
 % fonte: results/metrics.csv, scaling=weak, metric in {time_total_s, efficiency_weak, comm_fraction}; value (mediana) e std;
 % referência de E_w na coluna reference, por exemplo T_mpi(N=2000, b=64, p=1) = 0.50799 s
 \begin{tabular}{|l|r|r|r|r|r|r|r|r|}
@@ -484,18 +551,20 @@ em que cada numerador é o número de operações $2N^3$ do produto e cada denom
  & & \textbf{$(2000,1)$} & \multicolumn{3}{c|}{\textbf{$(4000,8)$}} & \multicolumn{3}{c|}{\textbf{$(6000,27)$}} \\
 \textbf{Versão} & \textbf{$b$} & \textbf{$T$ [s]} & \textbf{$T$ [s]} & \textbf{$E_w$} & \textbf{$f_{\mathrm{com}}$} & \textbf{$T$ [s]} & \textbf{$E_w$} & \textbf{$f_{\mathrm{com}}$} \\
 \hline\hline
-MPI & 64 & 0,508 (0,0038) & \textbf{0,569} (0,0014) & \textbf{0,893} (0,0023) & 0,088 & 0,860 (0,0027) & \textbf{0,591} (0,0019) & 0,32 \\ \hline
-MPI & 256 & \textbf{0,488} (0,0029) & 0,582 (0,0038) & 0,839 (0,0055) & 0,086 & \textbf{0,848} (0,014) & 0,576 (0,0091) & 0,33 \\ \hline
-MPI & 1024 & 0,566 (0,0012) & 8,58 (0,034) & 0,0660 (0,00026) & 0,0059 & 14,0 (0,12) & 0,0404 (0,00036) & 0,022 \\ \hline\hline
-MPI + OpenBLAS & 64 & 0,319 (0,0022) & 0,432 (0,0019) & \textbf{0,738} (0,0032) & 0,12 & 0,828 (0,0035) & \textbf{0,385} (0,0016) & 0,34 \\ \hline
-MPI + OpenBLAS & 256 & 0,196 (0,00044) & 0,284 (0,0012) & 0,689 (0,0030) & 0,18 & 0,566 (0,0053) & 0,346 (0,0032) & 0,52 \\ \hline
-MPI + OpenBLAS & 1024 & \textbf{0,174} (0,0011) & \textbf{0,261} (0,0014) & 0,665 (0,0035) & 0,20 & \textbf{0,550} (0,0023) & 0,316 (0,0013) & 0,53 \\ \hline
+MPI & 64 & 0,508 $\pm$ 0,0038 & \textbf{0,569} $\pm$ 0,0014 & \textbf{0,893} $\pm$ 0,0023 & 0,088 & 0,860 $\pm$ 0,0027 & \textbf{0,591} $\pm$ 0,0019 & 0,32 \\ \hline
+MPI & 256 & \textbf{0,488} $\pm$ 0,0029 & 0,582 $\pm$ 0,0038 & 0,839 $\pm$ 0,0055 & 0,086 & \textbf{0,848} $\pm$ 0,014 & 0,576 $\pm$ 0,0091 & 0,33 \\ \hline
+MPI & 1024 & 0,566 $\pm$ 0,0012 & 8,58 $\pm$ 0,034 & 0,0660 $\pm$ 0,00026 & 0,0059 & 14,0 $\pm$ 0,12 & 0,0404 $\pm$ 0,00036 & 0,022 \\ \hline\hline
+MPI + OpenBLAS & 64 & 0,319 $\pm$ 0,0022 & 0,432 $\pm$ 0,0019 & \textbf{0,738} $\pm$ 0,0032 & 0,12 & 0,828 $\pm$ 0,0035 & \textbf{0,385} $\pm$ 0,0016 & 0,34 \\ \hline
+MPI + OpenBLAS & 256 & 0,196 $\pm$ 0,00044 & 0,284 $\pm$ 0,0012 & 0,689 $\pm$ 0,0030 & 0,18 & 0,566 $\pm$ 0,0053 & 0,346 $\pm$ 0,0032 & 0,52 \\ \hline
+MPI + OpenBLAS & 1024 & \textbf{0,174} $\pm$ 0,0011 & \textbf{0,261} $\pm$ 0,0014 & 0,665 $\pm$ 0,0035 & 0,20 & \textbf{0,550} $\pm$ 0,0023 & 0,316 $\pm$ 0,0013 & 0,53 \\ \hline
 \end{tabular}
-\caption{Escalabilidade fraca em 1 nó, com os pares $(N,p)$ da Equação~\eqref{eq:fraca}, de 16 GFLOP por processo: mediana e desvio padrão de 5 execuções. $E_w$ pela Equação~\eqref{eq:ew}, com referência na mesma versão e bloco, $N=2000$ e $p=1$, que é a coluna $(2000,1)$, onde $E_w=1$. $f_{\mathrm{com}}$ pela Equação~\eqref{eq:fcom}, mediana. Em negrito: melhor bloco de cada versão em cada coluna, isto é, menor $T$ e maior $E_w$.}
+\caption{Escalabilidade fraca em 1 nó. Em negrito: melhor bloco de cada versão em cada coluna.}
 \label{tab:fraca}
 \end{table}
 
-\begin{figure}[!htb]
+Pela Tabela~\ref{tab:fraca}, a eficiência fraca cai em todas as configurações ao passar de $(4000,8)$ para $(6000,27)$, e a fração de comunicação sobe junto: na MPI + OpenBLAS com bloco 1024, $f_{\mathrm{com}}$ vai de 0,20 para 0,53. A Figura~\ref{fig:fraca} mostra essa queda de $E_w$ para os três blocos.
+
+\begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{efficiency_weak.pdf}
 \vspace{-1ex}
@@ -507,32 +576,6 @@ MPI + OpenBLAS & 1024 & \textbf{0,174} (0,0011) & \textbf{0,261} (0,0014) & 0,66
 A Tabela~\ref{tab:fases} e as Figuras~\ref{fig:fases}, \ref{fig:fases2} e~\ref{fig:fases3} separam distribuição, cálculo e coleta, definidos na Equação~\eqref{eq:fases}. O cálculo cai aproximadamente com $1/p$, e a distribuição cresce com $p$. Na MPI com $N=6000$ e bloco 256 a distribuição alcança o cálculo em $p=64$, com 0,311 contra 0,317 s, e o supera em $p=128$, com 0,381 contra 0,169 s; na MPI + OpenBLAS, cujo cálculo é mais curto, isso já ocorre em $p=32$, com 0,248 contra 0,233 s. Com $N=2000$ o cruzamento ocorre antes, entre $p=8$ e 32. A fração $f_{\mathrm{com}}$ da Equação~\eqref{eq:fcom} acompanha a queda de $E_p$: na MPI com $N=6000$ e bloco 256 ela vai de 0,063 em $p=8$, onde $E_p=0{,}91$, a 0,33 em $p=32$, onde $E_p=0{,}56$, a 0,69 em $p=128$, onde $E_p=0{,}19$, e a 0,98 em $p=1024$. Os máximos por fase não somam o total: pela Equação~\eqref{eq:max}, cada coluna é um máximo independente entre os ranks, e a coleta medida no rank 0 inclui a espera pelo rank mais lento. Por exemplo, na escalabilidade fraca da MPI com $N=6000$ e bloco 1024, o cálculo leva 13,69 s e a coleta 12,82 s, para um total de 14,01 s.
 % fonte: results/metrics.csv, metric in {time_distribution_s, time_compute_s, time_gather_s, time_total_s, comm_fraction}; A3 quebra N=2000 e N=6000
 
-\begin{table}[!htb]
-\centering\scriptsize
-\renewcommand{\arraystretch}{1.05}\setlength{\tabcolsep}{3.5pt}
-% fonte: results/metrics.csv, N=6000, scaling=strong, nodes=max(1,ceil(p/128)), MPI b=256 e MPI+OpenBLAS b=1024,
-% metric in {time_total_s, time_distribution_s, time_compute_s, time_gather_s, comm_fraction}; value (mediana) e std
-\begin{tabular}{|l|r|r|r|r|r|r|r|}
-\hline
-\textbf{Versão} & \textbf{$p$} & \textbf{Nós} & \textbf{Total [s]} & \textbf{Distribuição [s]} & \textbf{Cálculo [s]} & \textbf{Coleta [s]} & \textbf{$f_{\mathrm{com}}$} \\
-\hline\hline
-MPI, $b=256$ & 1 & 1 & 13,3 (0,025) & $1{,}9\cdot10^{-6}$ ($3{,}5\cdot10^{-7}$) & 13,3 (0,025) & $9{,}7\cdot10^{-6}$ ($1{,}1\cdot10^{-6}$) & $8{,}9\cdot10^{-7}$ ($6{,}7\cdot10^{-8}$) \\ \hline
-MPI, $b=256$ & 8 & 1 & 1,83 (0,0043) & 0,105 (0,0047) & 1,71 (0,0026) & 0,0222 (0,0045) & 0,0629 (0,0032) \\ \hline
-MPI, $b=256$ & 32 & 1 & 0,737 (0,0030) & 0,245 (0,0028) & 0,496 (0,00063) & 0,134 (0,0023) & 0,327 (0,0024) \\ \hline
-MPI, $b=256$ & 128 & 1 & 0,552 (0,014) & 0,381 (0,013) & 0,169 (0,00050) & 0,222 (0,011) & 0,694 (0,0077) \\ \hline
-MPI, $b=256$ & 256 & 2 & \textbf{0,528} (0,0066) & 0,422 (0,0063) & 0,104 (0,0064) & 0,220 (0,0082) & 0,805 (0,013) \\ \hline
-MPI, $b=256$ & 1024 & 8 & 3,61 (0,092) & 3,56 (0,096) & 0,0570 (0,047) & 0,425 (0,32) & 0,984 (0,013) \\ \hline\hline
-MPI + OpenBLAS, $b=1024$ & 1 & 1 & 4,62 (0,032) & $2{,}4\cdot10^{-6}$ ($2{,}5\cdot10^{-7}$) & 4,62 (0,032) & $1{,}3\cdot10^{-5}$ ($3{,}3\cdot10^{-6}$) & $3{,}2\cdot10^{-6}$ ($7{,}3\cdot10^{-7}$) \\ \hline
-MPI + OpenBLAS, $b=1024$ & 8 & 1 & 0,795 (0,0046) & 0,104 (0,0044) & 0,683 (0,0034) & 0,0221 (0,0012) & 0,143 (0,0027) \\ \hline
-MPI + OpenBLAS, $b=1024$ & 32 & 1 & \textbf{0,496} (0,0021) & 0,248 (0,0019) & 0,233 (0,0015) & 0,175 (0,0032) & 0,529 (0,0025) \\ \hline
-MPI + OpenBLAS, $b=1024$ & 128 & 1 & 0,508 (0,011) & 0,398 (0,012) & 0,118 (0,0022) & 0,214 (0,0075) & 0,768 (0,0069) \\ \hline
-MPI + OpenBLAS, $b=1024$ & 256 & 2 & 0,511 (0,058) & 0,425 (0,061) & 0,104 (0,020) & 0,199 (0,048) & 0,794 (0,031) \\ \hline
-MPI + OpenBLAS, $b=1024$ & 1024 & 8 & 3,70 (0,046) & 3,64 (0,042) & 0,0585 (0,0071) & 0,745 (0,77) & 0,984 (0,0018) \\ \hline
-\end{tabular}
-\caption{Tempo por fase com $N=6000$: mediana e desvio padrão de 5 execuções, com cada fase como máximo entre os ranks, pela Equação~\eqref{eq:max}; por isso as fases não somam o total. $f_{\mathrm{com}}$ pela Equação~\eqref{eq:fcom}, mediana sobre as execuções. Em negrito: menor tempo total de cada versão.}
-\label{tab:fases}
-\end{table}
-
 \begin{figure}[!htb]
 \centering
 \includegraphics[width=\textwidth]{fases_b256.pdf}
@@ -542,7 +585,10 @@ MPI + OpenBLAS, $b=1024$ & 1024 & 8 & 3,70 (0,046) & 3,64 (0,042) & 0,0585 (0,00
 \label{fig:fases}
 \end{figure}
 
-\begin{figure}[!htb]
+A distribuição não depende do tamanho de bloco, e sua curva é praticamente a mesma nos três blocos: com $N=6000$, ela leva 0,077 s em $p=4$ e entre 0,38 e 0,41 s em $p=128$. O que muda de um bloco para outro é o cálculo, como mostra a Figura~\ref{fig:fases2} para o bloco 64.
+% fonte: results/metrics.csv, scaling=strong, N=6000, nodes=1, time_distribution_s e time_compute_s por bloco
+
+\begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{fases_b64.pdf}
 \caption{Tempo de cada fase como na Figura~\ref{fig:fases}, para o bloco 64. Pontos: mediana de 5 execuções; barras: desvio padrão.}
@@ -550,7 +596,10 @@ MPI + OpenBLAS, $b=1024$ & 1024 & 8 & 3,70 (0,046) & 3,64 (0,042) & 0,0585 (0,00
 \label{fig:fases2}
 \end{figure}
 
-\begin{figure}[!htb]
+Com bloco 1024, na Figura~\ref{fig:fases3}, o cálculo da MPI fica muito mais lento entre $p=4$ e 32, com 27,8 s em $p=4$ e $N=6000$ contra cerca de 3,4 s nos outros blocos; é o mesmo colapso discutido na influência do tamanho de bloco. Na MPI + OpenBLAS ocorre o contrário: o bloco 1024 tem o cálculo mais rápido dos três.
+% fonte: results/metrics.csv, scaling=strong, N=6000, nodes=1, time_distribution_s e time_compute_s por bloco
+
+\begin{figure}[H]
 \centering
 \includegraphics[width=\textwidth]{fases_b1024.pdf}
 \caption{Tempo de cada fase como na Figura~\ref{fig:fases}, para o bloco 1024. Na MPI o cálculo domina até $p\approx 128$, efeito da degradação do kernel com esse bloco. Pontos: mediana de 5 execuções; barras: desvio padrão.}
@@ -560,6 +609,24 @@ MPI + OpenBLAS, $b=1024$ & 1024 & 8 & 3,70 (0,046) & 3,64 (0,042) & 0,0585 (0,00
 
 \section{Discussão}
 Há dois ganhos independentes. O kernel OpenBLAS sozinho, com $p=1$, dá $S^{\mathrm{tot}}_1$ de 1,56 a 1,61 com bloco 64, 2,32 a 2,46 com bloco 256 e 3,22 a 3,31 com bloco 1024. O paralelismo dá até $S_p = 26{,}5$ na MPI, com $N=6000$, $b=64$ e $p=256$, ou 25,2 com $b=256$. Combinados, o melhor speedup total medido é 32,3, da MPI + OpenBLAS com $N=6000$, $b=1024$ e $p=64$, em 0,473 s, contra 26,5 da MPI, como mostra a Tabela~\ref{tab:melhor}. A MPI + OpenBLAS tem o menor tempo absoluto nos três tamanhos, mas a menor eficiência paralela: quanto mais rápido o kernel, maior a fração do tempo gasta na comunicação, que é a mesma nas duas versões.
+
+A comparação das melhores configurações na Tabela~\ref{tab:melhor} sugere ainda que o kernel mais eficiente reduz os recursos necessários. Com $N=4000$, a MPI + OpenBLAS termina em 0,1760 s com 32 processos em 1 nó, enquanto a MPI precisa de 256 processos em 2 nós para chegar a 0,2217 s: o tempo cai 20,6\,\% com 8 vezes menos processos e metade dos nós. Com $N=6000$, a MPI + OpenBLAS leva 0,4733 s com 64 processos em 1 nó, contra 0,5144 s da MPI com 256 processos em 2 nós, ou seja, 8,0\,\% menos tempo com 4 vezes menos processos. Com $N=2000$ as duas usam 32 processos em 1 nó, e a MPI + OpenBLAS é 11,8\,\% mais rápida. Os resultados indicam que o OpenBLAS não substitui o paralelismo MPI, já que o melhor tempo continua exigindo dezenas de processos; ele parece, antes, tornar cada processo mais produtivo. Como cada processo usa 1 thread do OpenBLAS, podemos inferir que o ganho vem do kernel local, com SIMD, FMA e bloqueio de cache, e não de paralelismo multithread interno. Com um kernel mais rápido, o custo de comunicação da Equação~\eqref{eq:bcast} tende a dominar com menos processos, o que provavelmente explica por que o melhor ponto da MPI + OpenBLAS fica em 32 ou 64 processos, enquanto a MPI pura, com $N=4000$ e 6000, ainda ganha até 256. Nestes experimentos, melhorar a eficiência de cada processo mostrou-se mais vantajoso do que aumentar o grau de paralelismo; esse resultado se restringe aos tamanhos avaliados e não garante que o OpenBLAS dispense nós adicionais em matrizes maiores.
+% fonte: results/metrics.csv via Tabela tab:melhor (time_total_s, value): mpi 2000 b64 p32 0.04692, mpi_openblas 2000 b1024 p32 0.04140;
+% mpi 4000 b64 p256 n2 0.2217, mpi_openblas 4000 b1024 p32 0.1760; mpi 6000 b64 p256 n2 0.5144, mpi_openblas 6000 b1024 p64 0.4733;
+% reduções 1 - T_blas/T_mpi = 11,8 %, 20,6 %, 8,0 %
+
+Os resultados permitem estimar o que tende a compensar mais em cada situação. Uma medida útil para isso é o custo em núcleos-segundo, o número de núcleos ocupados multiplicado pelo tempo total, que estima quanto do cluster cada configuração consome. Por essa medida, os dados sugerem que otimizar o kernel compensa mais do que acrescentar processos. Com $N=4000$, a melhor configuração da MPI + OpenBLAS consome $32\cdot0{,}1760 = 5{,}6$ núcleos-segundo, contra $256\cdot0{,}2217 = 56{,}8$ da melhor MPI, cerca de 10 vezes mais recursos para um resultado mais lento; com $N=6000$, são $64\cdot0{,}4733 = 30{,}3$ contra $256\cdot0{,}5144 = 131{,}7$, cerca de 4,3 vezes. Nestes experimentos, a vantagem do OpenBLAS foi dupla: menor tempo e menor alocação. A desvantagem observada é a menor eficiência paralela, $E_p$ entre 0,13 e 0,24 nos pontos ótimos da Tabela~\ref{tab:melhor}, o que parece limitar o quanto ele ainda ganha com mais processos.
+
+Acrescentar processos parece compensar até perto do ponto de saturação da Tabela~\ref{tab:sat} e pouco depois dele. Na MPI com $N=6000$ e bloco 256, passar de $p=32$ para $p=256$ reduz o tempo de 0,737 para 0,528 s, isto é, 28\,\%, mas o custo sobe de 23,6 para 135,2 núcleos-segundo, 5,7 vezes mais. Se o objetivo é o menor tempo possível e o cluster está livre, $p=256$ ainda pode valer a pena; se o objetivo é usar bem uma alocação compartilhada, os resultados sugerem $p$ entre 32 e 64. Já $p=1024$ não compensou em nenhuma configuração medida: com $N=6000$ e bloco 256, o tempo em $p=1024$ é 6,8 vezes o de $p=256$, o que indica que a cópia de $B$ da Equação~\eqref{eq:bcast} passa a dominar. Entre 256 e 512 processos o quadro é misto; a MPI com bloco 1024, por exemplo, tem o maior $S_p$ em $p=512$.
+
+Ocupar o nó inteiro também não parece compensar sempre. De $p=64$ para $p=128$ em 1 nó, a MPI com $N=6000$ e bloco 256 ganha 13\,\%, dobrando os núcleos, e a MPI + OpenBLAS com bloco 1024 fica mais lenta. Espalhar os mesmos 128 processos em mais nós é mais rápido, até 1,49 vezes em 2 nós, como mostra a Tabela~\ref{tab:nos}, mas consome mais nós: com $N=6000$ e bloco 256, a MPI ocupa 0,552 nó-segundo em 1 nó, 0,908 em 2 nós e 3,54 em 8 nós. Em um cluster que reserva nós inteiros, como o Lovelace, podemos inferir que usar mais nós troca um ganho modesto de tempo por uma alocação bem maior.
+
+Os dados sugerem que a escolha do bloco pode pesar mais que a do número de processos. Na MPI com $N=6000$ e $p=4$, o bloco 1024 leva 27,9 s e o bloco 256 leva 3,48 s; nesse intervalo, nenhuma variação de $p$ produziu uma diferença dessa ordem. Para estes tamanhos, a regra prática que os resultados indicam é usar $b=256$ com o kernel em C e $b=1024$ com o OpenBLAS.
+
+Há possibilidades que estes experimentos não exploraram. Uma execução híbrida, com menos processos MPI por nó e várias threads do OpenBLAS em cada um, reduziria o número de cópias de $B$ por nó e talvez pudesse combinar o kernel rápido com menos comunicação. Uma distribuição 2D, como SUMMA, eliminaria a cópia completa de $B$, e a sobreposição de comunicação e cálculo com coletivas não bloqueantes poderia esconder parte do tempo de distribuição. Essas alternativas atacam o mesmo gargalo que os resultados apontam: a partir de algumas dezenas de processos, é a comunicação, e não o cálculo, que parece limitar o desempenho. Medir essas alternativas seria o passo natural para confirmar essa interpretação.
+% fonte: núcleos-segundo = p * T com T de tab:melhor e tab:tempos (results/metrics.csv, time_total_s): 32*0.1760, 256*0.2217, 64*0.4733, 256*0.5144,
+% 32*0.737, 256*0.528; p=1024/p=256 = 3.61/0.528; nó-segundo = nós * T de tab:nos (node_sweep.csv): 1*0.552, 2*0.454, 8*0.442;
+% 64->128: 0.635 -> 0.552 s (MPI) e 0.473 -> 0.508 s (MPI+OpenBLAS b1024); b1024 vs b256 em p=4: 27.9 vs 3.48 s
 
 O principal gargalo é a cópia completa de $B$: todo rank recebe $B$ inteira por \texttt{MPI\_Bcast}. Como $B$ tem $N^2$ valores \texttt{float} de 4 B, a memória ocupada pela cópia de $B$ em cada rank é
 \begin{equation}\label{eq:memB}
